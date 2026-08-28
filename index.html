@@ -1374,6 +1374,10 @@ const SEXO_POR_CATEGORIA = {
 const RACAS = ["Nelore","Cruzado","Angus","Outros"];
 const DG_OPCOES = ["Prenhe IATF","Prenhe Touro","Vazia","Não se aplica"];
 const PARIDADE_OPCOES = ["Primípara","Multípara","Solteira","Novilha"];
+const VAZIA_OPCOES = ["Solteira","Parida"];
+function getParidadeOpcoesAtual(){
+  return wiz.data.dg === "Vazia" ? VAZIA_OPCOES : PARIDADE_OPCOES;
+}
 const APART_FAIXAS = [
   {lbl:"< 360", min:-Infinity, max:359},
   {lbl:"361–390", min:361, max:390},
@@ -2712,8 +2716,10 @@ document.getElementById('btn-wiz-next').addEventListener('click', async ()=>{
     // checagem de duplicidade: ID Antigo (passo "ordem") e ID (passo "id") — únicos pra sempre, em qualquer fazenda-dia
     if(step.key === 'ordem' && wiz.data.idAntigo){
       setLoading(true);
-      const dup = await findDuplicate('idAntigo', String(wiz.data.idAntigo));
-      setLoading(false);
+      let dup = null;
+      try{ dup = await findDuplicate('idAntigo', String(wiz.data.idAntigo)); }
+      catch(e){ console.warn('Erro ao checar duplicidade de ID Antigo — seguindo sem bloquear:', e); }
+      finally{ setLoading(false); }
       if(dup){
         if(errEl()) errEl().textContent = `⚠ Já existe um animal com ID Antigo ${wiz.data.idAntigo} ${descreverDuplicata(dup)}. Esse número não pode repetir. Corrija pra continuar.`;
         return;
@@ -2721,8 +2727,10 @@ document.getElementById('btn-wiz-next').addEventListener('click', async ()=>{
     }
     if(step.key === 'id'){
       setLoading(true);
-      const dup = await findDuplicate('id', String(wiz.data.id));
-      setLoading(false);
+      let dup = null;
+      try{ dup = await findDuplicate('id', String(wiz.data.id)); }
+      catch(e){ console.warn('Erro ao checar duplicidade de ID — seguindo sem bloquear:', e); }
+      finally{ setLoading(false); }
       if(dup){
         if(errEl()) errEl().textContent = `⚠ Já existe um animal com ID ${wiz.data.id} ${descreverDuplicata(dup)}. Esse ID é único e não pode repetir. Corrija pra continuar.`;
         return;
@@ -2776,7 +2784,7 @@ function selectOptionByNumber(stepKey, value){
   const card = document.querySelector(`${selectorMap[stepKey]} .opt-card[data-v="${value}"]`);
   if(!card) return;
   card.click(); // reaproveita a lógica de seleção já existente (define wiz.data, foca, etc)
-  const semCampoExtra = (stepKey !== 'dg') || value === 'Vazia' || value === 'Não se aplica';
+  const semCampoExtra = (stepKey !== 'dg') || value === 'Não se aplica';
   if(semCampoExtra){
     const btn = document.getElementById('btn-wiz-next');
     if(btn && !btn.disabled) btn.click();
@@ -2796,10 +2804,11 @@ document.addEventListener('keydown', (e)=>{
   if(!wiz) return;
   // se o foco estiver dentro da Paridade, o número seleciona ali (não na opção principal do DG)
   if(document.activeElement && document.activeElement.closest && document.activeElement.closest('#opt-paridade')){
+    const opcoesAtuais = getParidadeOpcoesAtual();
     const idxParidade = Number(e.key) - 1;
-    if(idxParidade>=0 && idxParidade<PARIDADE_OPCOES.length){
+    if(idxParidade>=0 && idxParidade<opcoesAtuais.length){
       e.preventDefault();
-      selectParidadeByNumber(PARIDADE_OPCOES[idxParidade]);
+      selectParidadeByNumber(opcoesAtuais[idxParidade]);
     }
     return;
   }
@@ -2836,6 +2845,7 @@ function validateStep(key){
     case 'dg':
       if(!d.dg) return "Selecione o diagnóstico.";
       if((d.dg==="Prenhe IATF"||d.dg==="Prenhe Touro") && !d.paridade) return "Informe se é primípara ou multípara.";
+      if(d.dg==="Vazia" && !d.paridade) return "Informe se é solteira ou já pariu.";
       return null;
     case 'data': return !d.dataTrabalho ? "Informe a data de trabalho." : null;
     default: return null;
@@ -3028,16 +3038,8 @@ function renderStepDG(){
     </div>
     <div class="field hide" id="paridade-field" style="margin-top:16px;">
       <label>Paridade</label>
-      <div class="option-grid" id="opt-paridade">
-        ${PARIDADE_OPCOES.map((p,i)=>`<div class="opt-card ${wiz.data.paridade===p?'sel':''}" data-v="${p}" tabindex="0"><span class="opt-label"><span class="opt-num">${i+1}</span>${p}</span><span class="chk"></span></div>`).join("")}
-      </div>
+      <div class="option-grid" id="opt-paridade"></div>
     </div>`);
-  const toggleIdade = ()=>{
-    const prenhe = wiz.data.dg==="Prenhe IATF" || wiz.data.dg==="Prenhe Touro";
-    document.getElementById('idade-gest-field').classList.toggle('hide', !prenhe);
-    document.getElementById('paridade-field').classList.toggle('hide', !prenhe);
-    if(!prenhe) wiz.data.paridade = "";
-  };
   const bindParidadeCards = ()=>{
     document.querySelectorAll('#opt-paridade .opt-card').forEach(card=>{
       card.addEventListener('click', ()=>{
@@ -3048,6 +3050,24 @@ function renderStepDG(){
       });
     });
   };
+  const renderParidadeOptions = ()=>{
+    const opcoes = getParidadeOpcoesAtual();
+    document.getElementById('opt-paridade').innerHTML = opcoes.map((p,i)=>`<div class="opt-card ${wiz.data.paridade===p?'sel':''}" data-v="${p}" tabindex="0"><span class="opt-label"><span class="opt-num">${i+1}</span>${p}</span><span class="chk"></span></div>`).join("");
+    bindParidadeCards();
+  };
+  const toggleIdade = ()=>{
+    const prenhe = wiz.data.dg==="Prenhe IATF" || wiz.data.dg==="Prenhe Touro";
+    const vazia = wiz.data.dg==="Vazia";
+    document.getElementById('idade-gest-field').classList.toggle('hide', !prenhe);
+    document.getElementById('paridade-field').classList.toggle('hide', !(prenhe||vazia));
+    if(!prenhe && !vazia){
+      wiz.data.paridade = "";
+    } else {
+      const opcoesAtuais = getParidadeOpcoesAtual();
+      if(!opcoesAtuais.includes(wiz.data.paridade)) wiz.data.paridade = ""; // opção antiga não existe mais nessa lista — reseta
+      renderParidadeOptions();
+    }
+  };
   setTimeout(()=>{
     document.querySelectorAll('#opt-dg .opt-card').forEach(card=>{
       card.addEventListener('click', ()=>{
@@ -3055,10 +3075,15 @@ function renderStepDG(){
         document.querySelectorAll('#opt-dg .opt-card').forEach(c=>c.classList.remove('sel'));
         card.classList.add('sel');
         toggleIdade();
-        // se abrir o campo de idade gestacional, foca nele pra digitar direto; senão foca o card pro Enter avançar
+        // se abrir o campo de idade gestacional, foca nele pra digitar direto; senão, se abrir o
+        // card de paridade (prenhe ou vazia), foca nele; senão foca o card pro Enter avançar
         const idadeField = document.getElementById('idade-gest-field');
+        const paridadeField = document.getElementById('paridade-field');
         if(idadeField && !idadeField.classList.contains('hide')){
           document.getElementById('in-idadegest').focus();
+        } else if(paridadeField && !paridadeField.classList.contains('hide')){
+          const primeiroCard = document.querySelector('#opt-paridade .opt-card');
+          if(primeiroCard) primeiroCard.focus(); else card.focus();
         } else {
           card.focus();
         }
@@ -3073,7 +3098,6 @@ function renderStepDG(){
         if(primeiroCard) primeiroCard.focus();
       }
     });
-    bindParidadeCards();
     toggleIdade();
   });
   return el;
@@ -3110,6 +3134,8 @@ function renderStepRevisar(){
   ];
   if(d.dg==="Prenhe IATF"||d.dg==="Prenhe Touro"){
     rows.push({ k:"Idade gestacional", v:(d.idadeGestacional||"—")+" meses", step:"dg" });
+    rows.push({ k:"Paridade", v:d.paridade||"—", step:"dg" });
+  } else if(d.dg==="Vazia"){
     rows.push({ k:"Paridade", v:d.paridade||"—", step:"dg" });
   }
   rows.push({ k:"Data", v:formatDataBR(d.dataTrabalho), step:null });
@@ -3243,16 +3269,23 @@ async function findDuplicate(field, value){
   // depender de nenhum tempo de espera, garante que nunca trava esperando resposta
   if(!navigator.onLine){ duplicateCheckUncertain = true; return null; }
   // 2) cruza com o Firestore (outros retiros da mesma fazenda)
-  const key = currentFarm.farmGroupKey || currentFarm.id; // compatibilidade com fazendas antigas sem farmGroupKey
-  const q = currentFarm.farmGroupKey
-    ? db.collection('animais').where('farmGroupKey','==',key).where(field,'==', value)
-    : db.collection('animais').where('fazendaId','==',currentFarm.id).where(field,'==', value);
-  const snap = await getSafe(q.limit(1), 1500);
-  if(snap.uncertain){ duplicateCheckUncertain = true; return null; }
-  if(snap.empty) return null;
-  const doc = snap.docs[0];
-  if(doc.id === wiz.editingId) return null;
-  return { id: doc.id, ...doc.data() };
+  try{
+    const key = currentFarm.farmGroupKey || currentFarm.id; // compatibilidade com fazendas antigas sem farmGroupKey
+    const q = currentFarm.farmGroupKey
+      ? db.collection('animais').where('farmGroupKey','==',key).where(field,'==', value)
+      : db.collection('animais').where('fazendaId','==',currentFarm.id).where(field,'==', value);
+    const snap = await getSafe(q.limit(1), 1500);
+    if(snap.uncertain){ duplicateCheckUncertain = true; return null; }
+    if(snap.empty) return null;
+    const doc = snap.docs[0];
+    if(doc.id === wiz.editingId) return null;
+    return { id: doc.id, ...doc.data() };
+  } catch(e){
+    // qualquer erro inesperado ao montar/enviar a consulta — nunca trava o cadastro por causa disso
+    console.warn('Erro inesperado checando duplicidade — seguindo sem bloquear:', e);
+    duplicateCheckUncertain = true;
+    return null;
+  }
 }
 // Retorna {field, label, animal} do primeiro conflito encontrado, ou null
 async function checkDuplicates(){
