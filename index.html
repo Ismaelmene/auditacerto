@@ -2793,9 +2793,7 @@ function selectOptionByNumber(stepKey, value){
 function selectParidadeByNumber(value){
   const card = document.querySelector(`#opt-paridade .opt-card[data-v="${value}"]`);
   if(!card) return;
-  card.click();
-  const btn = document.getElementById('btn-wiz-next');
-  if(btn && !btn.disabled) btn.click();
+  card.click(); // só alterna marcado/desmarcado — dá pra apertar outro número pra marcar mais de um
 }
 document.addEventListener('keydown', (e)=>{
   if(!/^[1-9]$/.test(e.key)) return;
@@ -3026,6 +3024,12 @@ function renderStepCategoria(){
   return el;
 }
 
+function getParidadeSelecionadas(){
+  return (wiz.data.paridade||"").split(",").map(s=>s.trim()).filter(Boolean);
+}
+function setParidadeSelecionadas(arr){
+  wiz.data.paridade = arr.join(", ");
+}
 function renderStepDG(){
   const opts = DG_OPCOES;
   const el = stepWrap("Diagnóstico gestacional", "",
@@ -3043,16 +3047,24 @@ function renderStepDG(){
   const bindParidadeCards = ()=>{
     document.querySelectorAll('#opt-paridade .opt-card').forEach(card=>{
       card.addEventListener('click', ()=>{
-        wiz.data.paridade = card.dataset.v;
-        document.querySelectorAll('#opt-paridade .opt-card').forEach(c=>c.classList.remove('sel'));
-        card.classList.add('sel');
+        const val = card.dataset.v;
+        let selecionadas = getParidadeSelecionadas();
+        if(selecionadas.includes(val)){
+          selecionadas = selecionadas.filter(v=>v!==val);
+          card.classList.remove('sel');
+        } else {
+          selecionadas.push(val);
+          card.classList.add('sel');
+        }
+        setParidadeSelecionadas(selecionadas);
         card.focus();
       });
     });
   };
   const renderParidadeOptions = ()=>{
     const opcoes = getParidadeOpcoesAtual();
-    document.getElementById('opt-paridade').innerHTML = opcoes.map((p,i)=>`<div class="opt-card ${wiz.data.paridade===p?'sel':''}" data-v="${p}" tabindex="0"><span class="opt-label"><span class="opt-num">${i+1}</span>${p}</span><span class="chk"></span></div>`).join("");
+    const selecionadas = getParidadeSelecionadas();
+    document.getElementById('opt-paridade').innerHTML = opcoes.map((p,i)=>`<div class="opt-card ${selecionadas.includes(p)?'sel':''}" data-v="${p}" tabindex="0"><span class="opt-label"><span class="opt-num">${i+1}</span>${p}</span><span class="chk"></span></div>`).join("");
     bindParidadeCards();
   };
   const toggleIdade = ()=>{
@@ -3064,7 +3076,7 @@ function renderStepDG(){
       wiz.data.paridade = "";
     } else {
       const opcoesAtuais = getParidadeOpcoesAtual();
-      if(!opcoesAtuais.includes(wiz.data.paridade)) wiz.data.paridade = ""; // opção antiga não existe mais nessa lista — reseta
+      setParidadeSelecionadas(getParidadeSelecionadas().filter(v=>opcoesAtuais.includes(v))); // tira opção que não existe mais nessa lista
       renderParidadeOptions();
     }
   };
