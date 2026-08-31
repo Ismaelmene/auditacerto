@@ -1367,6 +1367,7 @@ let animals = []; // cache dos animais da fazenda atual
 let signupMode = false;
 
 const CATEGORIAS = ["Bezerro","Bezerra","Garrote","Novilha","Vaca","Boi","Touro"];
+const STATUS_BEZERRO_OPCOES = ["Desmama","Mamando"];
 const SEXO_POR_CATEGORIA = {
   "Bezerro":"Macho","Garrote":"Macho","Boi":"Macho","Touro":"Macho",
   "Bezerra":"Fêmea","Novilha":"Fêmea","Vaca":"Fêmea"
@@ -1481,7 +1482,7 @@ function newWizard(){
   wiz = {
     steps: buildSteps(),
     idx: 0,
-    data: { ordem:"", idAntigo:"", id:"", peso: (typeof proximoPesoPreCarregado!=='undefined' && proximoPesoPreCarregado!==null) ? proximoPesoPreCarregado : "", pasto:"", pastoManual:"", idadeMeses:"", mesNasc:"", anoNasc:"", raca:"", categoria:"", sexo:"", dg:"", idadeGestacional:"", paridade:"", dataTrabalho: sessionWorkDate || todayISO(), obs:"" },
+    data: { ordem:"", idAntigo:"", id:"", peso: (typeof proximoPesoPreCarregado!=='undefined' && proximoPesoPreCarregado!==null) ? proximoPesoPreCarregado : "", pasto:"", pastoManual:"", idadeMeses:"", mesNasc:"", anoNasc:"", raca:"", categoria:"", sexo:"", statusBezerro:"", dg:"", idadeGestacional:"", paridade:"", dataTrabalho: sessionWorkDate || todayISO(), obs:"" },
     editingId: null,
     blockReason: null
   };
@@ -2441,6 +2442,7 @@ function exportRowsFrom(list){
     "Nascimento (mês/ano)": (a.mesNasc && a.anoNasc) ? `${a.mesNasc}/${a.anoNasc}` : "",
     "Raça": a.raca,
     "Categoria": a.categoria,
+    "Desmama/Mamando": a.statusBezerro||"",
     "Sexo": a.sexo,
     "DG": a.dg,
     "Idade Gestacional (meses)": a.idadeGestacional||"",
@@ -2534,7 +2536,7 @@ async function exportPDFFrom(list, label, chartsSpec){
   let y = doc.lastAutoTable.finalY + 12; // espaço seguro entre as duas tabelas
   const pdfHeaders = [
     "Ordem","ID\nAntigo","ID","Peso\n(Kg)","Apartação","Destino","Idade\n(meses)","Nascimento\n(mês/ano)",
-    "Raça","Categoria","Sexo","DG","Idade\nGestacional\n(meses)","Paridade","Data","Período","Auditor","Retiro","Fazenda","Obs"
+    "Raça","Categoria","Desmama/\nMamando","Sexo","DG","Idade\nGestacional\n(meses)","Paridade","Data","Período","Auditor","Retiro","Fazenda","Obs"
   ];
   doc.autoTable({
     startY: y,
@@ -2543,7 +2545,7 @@ async function exportPDFFrom(list, label, chartsSpec){
     styles: { fontSize: 6.3, cellPadding: 1.4, overflow: 'linebreak', valign: 'middle' },
     headStyles: { fillColor: [24,38,25], fontSize: 6.3, halign: 'center', valign: 'middle' },
     bodyStyles: { halign: 'center' },
-    columnStyles: { 19: { halign: 'left' } } // Obs alinhado à esquerda, mais fácil de ler texto livre
+    columnStyles: { 20: { halign: 'left' } } // Obs alinhado à esquerda, mais fácil de ler texto livre
   });
   doc.save(exportFileName("pdf", label));
 }
@@ -2784,7 +2786,9 @@ function selectOptionByNumber(stepKey, value){
   const card = document.querySelector(`${selectorMap[stepKey]} .opt-card[data-v="${value}"]`);
   if(!card) return;
   card.click(); // reaproveita a lógica de seleção já existente (define wiz.data, foca, etc)
-  const semCampoExtra = (stepKey !== 'dg') || value === 'Não se aplica';
+  const semCampoExtra = (stepKey === 'raca')
+    || (stepKey === 'dg' && value === 'Não se aplica')
+    || (stepKey === 'categoria' && value !== 'Bezerro' && value !== 'Bezerra');
   if(semCampoExtra){
     const btn = document.getElementById('btn-wiz-next');
     if(btn && !btn.disabled) btn.click();
@@ -2807,6 +2811,16 @@ document.addEventListener('keydown', (e)=>{
     if(idxParidade>=0 && idxParidade<opcoesAtuais.length){
       e.preventDefault();
       selectParidadeByNumber(opcoesAtuais[idxParidade]);
+    }
+    return;
+  }
+  // se o foco estiver no card de Desmama/Mamando, o número seleciona ali (não na Categoria principal)
+  if(document.activeElement && document.activeElement.closest && document.activeElement.closest('#opt-status-bezerro')){
+    const idxStatus = Number(e.key) - 1;
+    if(idxStatus>=0 && idxStatus<STATUS_BEZERRO_OPCOES.length){
+      e.preventDefault();
+      const card = document.querySelector(`#opt-status-bezerro .opt-card[data-v="${STATUS_BEZERRO_OPCOES[idxStatus]}"]`);
+      if(card){ card.click(); const btn = document.getElementById('btn-wiz-next'); if(btn && !btn.disabled) btn.click(); }
     }
     return;
   }
@@ -2839,7 +2853,10 @@ function validateStep(key){
       if(d.idadeMeses===""||isNaN(d.idadeMeses)||Number(d.idadeMeses)<0) return "Data de nascimento inválida.";
       return null;
     case 'raca': return !d.raca ? "Selecione a raça." : null;
-    case 'categoria': return !d.categoria ? "Selecione a categoria." : null;
+    case 'categoria':
+      if(!d.categoria) return "Selecione a categoria.";
+      if((d.categoria==="Bezerro"||d.categoria==="Bezerra") && !d.statusBezerro) return "Informe se está em desmama ou ainda mamando.";
+      return null;
     case 'dg':
       if(!d.dg) return "Selecione o diagnóstico.";
       if((d.dg==="Prenhe IATF"||d.dg==="Prenhe Touro") && !d.paridade) return "Informe se é primípara ou multípara.";
@@ -2857,15 +2874,49 @@ function stepWrap(title, sub, innerHtml){
   return div;
 }
 
+function ultimosAnimaisCadastrados(n){
+  return animals
+    .filter(a => a.docId !== wiz.editingId)
+    .slice()
+    .sort((a,b)=>{
+      const ta = a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0;
+      const tb = b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : 0;
+      if(tb !== ta) return tb - ta;
+      return (b.ordem||0) - (a.ordem||0);
+    })
+    .slice(0, n);
+}
 function renderStepOrdem(){
+  const recentes = ultimosAnimaisCadastrados(3);
   const el = stepWrap("Ordem", "Número sequencial da passagem no tronco/curral — gerado automaticamente, reinicia a cada novo dia.",
     `<div class="locked-num">${wiz.data.ordem}<span class="lock-tag">🔒 travado</span></div>
      <div class="field" style="margin-top:14px;">
        <label>ID antigo (opcional)</label>
        <input type="text" id="in-idantigo" value="${wiz.data.idAntigo}" placeholder="Se o animal já teve outra identificação">
+     </div>
+     <div class="section-title" style="margin-top:22px;">Últimos cadastrados</div>
+     <div id="recentes-list">
+       ${recentes.length ? recentes.map(a=>`
+         <div class="animal-row" data-editid="${a.docId}" style="margin-bottom:8px;${a.confirmado?'opacity:0.6;':''}">
+           <div class="id-block">
+             <div class="tagid">ID ${a.id}${a.idAntigo?' · antigo '+a.idAntigo:''}</div>
+             <div class="meta">#${a.ordem}${a.confirmado?' · 🔒 conferido':' · toque pra editar'}</div>
+           </div>
+           <div class="peso">${a.peso||'—'}<span style="font-size:11px;font-weight:600;"> kg</span></div>
+         </div>`).join("")
+       : `<div class="empty-state" style="padding:14px 10px;">Nenhum cadastro ainda nesse retiro.</div>`}
      </div>`);
   setTimeout(()=>{
     document.getElementById('in-idantigo').addEventListener('input', e=> wiz.data.idAntigo = e.target.value);
+    document.querySelectorAll('#recentes-list [data-editid]').forEach(row=>{
+      row.addEventListener('click', ()=>{
+        const a = animals.find(x=>x.docId===row.dataset.editid);
+        if(a && a.confirmado){ toast("Esse animal já foi conferido — não pode mais ser editado."); return; }
+        if(!confirm("Sair desse cadastro (sem salvar) e editar esse animal da lista?")) return;
+        clearDraft();
+        openAnimalForEdit(row.dataset.editid);
+      });
+    });
   });
   return el;
 }
@@ -3007,7 +3058,28 @@ function renderStepCategoria(){
   const el = stepWrap("Categoria", "Define automaticamente o sexo do animal.",
     `<div class="option-grid" id="opt-cat">
       ${CATEGORIAS.map((c,i)=>`<div class="opt-card ${wiz.data.categoria===c?'sel':''}" data-v="${c}" tabindex="0"><span class="opt-label"><span class="opt-num">${i+1}</span>${c}</span><span class="chk"></span></div>`).join("")}
+    </div>
+    <div class="field hide" id="status-bezerro-field" style="margin-top:16px;">
+      <label>Desmama ou mamando?</label>
+      <div class="option-grid" id="opt-status-bezerro">
+        ${STATUS_BEZERRO_OPCOES.map((s,i)=>`<div class="opt-card ${wiz.data.statusBezerro===s?'sel':''}" data-v="${s}" tabindex="0"><span class="opt-label"><span class="opt-num">${i+1}</span>${s}</span><span class="chk"></span></div>`).join("")}
+      </div>
     </div>`);
+  const toggleStatusBezerro = ()=>{
+    const ehBezerro = wiz.data.categoria === "Bezerro" || wiz.data.categoria === "Bezerra";
+    document.getElementById('status-bezerro-field').classList.toggle('hide', !ehBezerro);
+    if(!ehBezerro) wiz.data.statusBezerro = "";
+  };
+  const bindStatusBezerroCards = ()=>{
+    document.querySelectorAll('#opt-status-bezerro .opt-card').forEach(card=>{
+      card.addEventListener('click', ()=>{
+        wiz.data.statusBezerro = card.dataset.v;
+        document.querySelectorAll('#opt-status-bezerro .opt-card').forEach(c=>c.classList.remove('sel'));
+        card.classList.add('sel');
+        card.focus();
+      });
+    });
+  };
   setTimeout(()=>{
     document.querySelectorAll('#opt-cat .opt-card').forEach(card=>{
       card.addEventListener('click', ()=>{
@@ -3017,9 +3089,18 @@ function renderStepCategoria(){
         else if(wiz.data.dg === "Não se aplica") wiz.data.dg = "";
         document.querySelectorAll('#opt-cat .opt-card').forEach(c=>c.classList.remove('sel'));
         card.classList.add('sel');
-        card.focus();
+        toggleStatusBezerro();
+        const statusField = document.getElementById('status-bezerro-field');
+        if(statusField && !statusField.classList.contains('hide')){
+          const primeiroCard = document.querySelector('#opt-status-bezerro .opt-card');
+          if(primeiroCard) primeiroCard.focus(); else card.focus();
+        } else {
+          card.focus();
+        }
       });
     });
+    bindStatusBezerroCards();
+    toggleStatusBezerro();
   });
   return el;
 }
@@ -3144,6 +3225,9 @@ function renderStepRevisar(){
     { k:"Sexo", v:d.sexo, step:"categoria" },
     { k:"DG", v:d.dg, step:"dg" },
   ];
+  if(d.categoria==="Bezerro"||d.categoria==="Bezerra"){
+    rows.splice(rows.findIndex(r=>r.k==="Sexo")+1, 0, { k:"Desmama/Mamando", v:d.statusBezerro||"—", step:"categoria" });
+  }
   if(d.dg==="Prenhe IATF"||d.dg==="Prenhe Touro"){
     rows.push({ k:"Idade gestacional", v:(d.idadeGestacional||"—")+" meses", step:"dg" });
     rows.push({ k:"Paridade", v:d.paridade||"—", step:"dg" });
@@ -3337,6 +3421,7 @@ async function salvarAnimal(){
     raca: d.raca,
     categoria: d.categoria,
     sexo: d.sexo,
+    statusBezerro: d.statusBezerro || "",
     dg: d.dg || "Não se aplica",
     idadeGestacional: d.idadeGestacional || "",
     paridade: d.paridade || "",
@@ -4608,6 +4693,7 @@ document.getElementById('btn-importar-operacao').addEventListener('click', async
       "Idade (meses)": getCol(headerRow, r, "Idade (meses)"),
       "Raça": getCol(headerRow, r, "Raça"),
       "Categoria": getCol(headerRow, r, "Categoria"),
+      "Desmama/Mamando": getCol(headerRow, r, "Desmama/Mamando"),
       "Sexo": getCol(headerRow, r, "Sexo"),
       "DG": getCol(headerRow, r, "DG"),
       "Idade Gestacional (meses)": getCol(headerRow, r, "Idade Gestacional (meses)", "Idade Gestacional"),
@@ -4673,6 +4759,7 @@ document.getElementById('btn-importar-operacao').addEventListener('click', async
         idadeMeses: row["Idade (meses)"] !== "" ? Number(row["Idade (meses)"]) : "",
         raca: String(row["Raça"] || ""),
         categoria: String(row["Categoria"] || ""),
+        statusBezerro: String(row["Desmama/Mamando"] || ""),
         sexo: String(row["Sexo"] || ""),
         dg: String(row["DG"] || "Não se aplica"),
         idadeGestacional: row["Idade Gestacional (meses)"] || "",
