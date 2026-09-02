@@ -253,6 +253,10 @@ body.login-mode #app{background:var(--ink);}
   background:var(--ok-bg);border:2px solid var(--grass);color:var(--grass-deep);
   border-radius:12px;padding:16px;margin-bottom:16px;font-weight:700;font-size:14.5px;text-align:center;
 }
+.err-banner{
+  background:var(--alert-bg);border:2px solid var(--alert);color:var(--alert);
+  border-radius:12px;padding:14px 16px;margin:0 0 16px;font-weight:700;font-size:14px;line-height:1.4;
+}
 
 .bottom-bar{
   flex-shrink:0;padding:14px 20px calc(14px + env(safe-area-inset-bottom));
@@ -797,6 +801,13 @@ body.login-mode #app{background:var(--ink);}
 
         <div class="section-title" style="margin-top:16px;">Atividade em tempo real <span class="live-dot"></span></div>
         <div id="admin-feed"></div>
+
+        <div class="section-title" style="margin-top:18px;">✏ Editar animal</div>
+        <p class="page-sub" style="margin-top:-6px;">Corrija um cadastro direto por aqui, mesmo que já esteja conferido. Pede senha antes de abrir a edição.</p>
+        <div class="search-bar">
+          <input type="text" id="admin-edit-search" placeholder="Buscar por ID ou Ordem...">
+        </div>
+        <div id="admin-edit-search-results"></div>
       </div>
 
       <!-- FAZENDAS -->
@@ -932,6 +943,77 @@ body.login-mode #app{background:var(--ink);}
       <div class="btn-row">
         <button class="btn btn-secondary" id="btn-modal-cancel">Cancelar</button>
         <button class="btn btn-primary" id="btn-modal-confirm">Começar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MODAL: EDITAR ANIMAL (ADMIN) ============ -->
+  <div id="modal-admin-edit" class="modal-overlay hide">
+    <div class="modal-card" style="max-height:85vh;overflow-y:auto;">
+      <h1 class="page-title" style="margin-top:0;">Editar animal</h1>
+      <p class="page-sub" id="admin-edit-sublabel">—</p>
+      <div class="field"><label>Ordem</label><input type="number" id="ae-ordem"></div>
+      <div class="field"><label>ID</label><input type="text" id="ae-id"></div>
+      <div class="field"><label>ID antigo</label><input type="text" id="ae-idantigo"></div>
+      <div class="field"><label>Peso (kg)</label><input type="number" id="ae-peso" inputmode="decimal"></div>
+      <div class="field"><label>Destino</label><input type="text" id="ae-pasto"></div>
+      <div class="field">
+        <label>Raça</label>
+        <select id="ae-raca">
+          <option value="Nelore">Nelore</option>
+          <option value="Cruzado">Cruzado</option>
+          <option value="Angus">Angus</option>
+          <option value="Outros">Outros</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Categoria</label>
+        <select id="ae-categoria">
+          <option value="Bezerro">Bezerro</option>
+          <option value="Bezerra">Bezerra</option>
+          <option value="Garrote">Garrote</option>
+          <option value="Novilha">Novilha</option>
+          <option value="Vaca">Vaca</option>
+          <option value="Boi">Boi</option>
+          <option value="Touro">Touro</option>
+        </select>
+      </div>
+      <div class="field hide" id="ae-status-bezerro-field">
+        <label>Desmama ou mamando?</label>
+        <select id="ae-status-bezerro">
+          <option value="">—</option>
+          <option value="Desmama">Desmama</option>
+          <option value="Mamando">Mamando</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Sexo</label>
+        <select id="ae-sexo">
+          <option value="Macho">Macho</option>
+          <option value="Fêmea">Fêmea</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Nascimento (mês/ano)</label>
+        <input type="text" id="ae-nascimento" inputmode="numeric" placeholder="MM/AA" maxlength="5">
+      </div>
+      <div class="field hide" id="ae-dg-field">
+        <label>Diagnóstico gestacional (DG)</label>
+        <select id="ae-dg">
+          <option value="Não se aplica">Não se aplica</option>
+          <option value="Prenhe IATF">Prenhe IATF</option>
+          <option value="Prenhe Touro">Prenhe Touro</option>
+          <option value="Vazia">Vazia</option>
+        </select>
+      </div>
+      <div class="field hide" id="ae-idadegest-field"><label>Idade gestacional (meses)</label><input type="number" id="ae-idadegest"></div>
+      <div class="field hide" id="ae-paridade-field"><label>Paridade</label><input type="text" id="ae-paridade" placeholder="Ex: Primípara, Multípara"></div>
+      <div class="field"><label>Data de trabalho</label><input type="date" id="ae-data"></div>
+      <div class="field"><label>Observações</label><textarea id="ae-obs"></textarea></div>
+      <div id="ae-err" class="err-banner hide"></div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="btn-ae-cancel">Cancelar</button>
+        <button class="btn btn-primary" id="btn-ae-save">Salvar alterações</button>
       </div>
     </div>
   </div>
@@ -1391,6 +1473,17 @@ function formatDataBR(iso){
   const [y,m,d] = iso.split('-');
   return `${d}/${m}/${y}`;
 }
+// Extrai o horário (em milissegundos) de um campo createdAt, aceitando tanto o objeto
+// Timestamp do Firestore (com .toMillis) quanto a versão já "achatada" em {seconds,
+// nanoseconds} que sobra depois de passar pelo localStorage (JSON não preserva métodos
+// de objetos) — sem isso, um cadastro ainda na fila de sincronização podia cair pro fim
+// da lista de "últimos cadastrados" por parecer mais antigo do que realmente é.
+function millisOf(ts){
+  if(!ts) return 0;
+  if(typeof ts.toMillis === 'function') return ts.toMillis();
+  if(typeof ts.seconds === 'number') return ts.seconds*1000 + Math.floor((ts.nanoseconds||0)/1e6);
+  return 0;
+}
 function faixaApartacao(peso){
   const f = APART_FAIXAS.find(f => peso>=f.min && peso<=f.max);
   return f ? f.lbl : "—";
@@ -1499,6 +1592,13 @@ function toast(msg){
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.remove('hide');
   setTimeout(()=>t.classList.add('hide'), 2200);
+}
+function setStepErr(msg){
+  const el = document.getElementById('step-err');
+  if(!el) return;
+  el.textContent = msg || "";
+  el.classList.toggle('hide', !msg);
+  if(msg) el.scrollIntoView({behavior:'smooth', block:'start'});
 }
 function goScreen(name){
   ['login','home','list','wizard','config','conferencia','admin','embarque'].forEach(s=>hide('screen-'+s));
@@ -2578,16 +2678,22 @@ function renderList(){
       String(a.idAntigo||"").toLowerCase().includes(q)
     );
   }
-  filtered = filtered.slice().sort((a,b)=> (a.ordem||0)-(b.ordem||0));
+  // Lista-resumo: numeração sequencial própria dessa tela (1,2,3...), sempre pela ordem
+  // do ID do menor pro maior — não é o número de "Ordem" do cadastro (que reinicia a cada dia).
+  filtered = filtered.slice().sort((a,b)=>{
+    const na = Number(a.id), nb = Number(b.id);
+    if(!isNaN(na) && !isNaN(nb)) return na - nb;
+    return String(a.id||"").localeCompare(String(b.id||""), 'pt-BR', {numeric:true});
+  });
   if(filtered.length===0){
     listEl.innerHTML = `<div class="empty-state"><div class="tag-big" style="background:var(--line);"></div>Nenhum animal encontrado.</div>`;
     return;
   }
-  listEl.innerHTML = filtered.map(a => `
+  listEl.innerHTML = filtered.map((a, idx) => `
     <div class="animal-row" data-id="${a.docId}" style="flex-direction:column;align-items:stretch;">
       <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
         <div class="id-block">
-          <div class="tagid">#${a.ordem} · ID ${a.id}</div>
+          <div class="tagid">#${idx+1} · ID ${a.id}</div>
           <div class="meta">${a.categoria||"—"} · ${a.raca||"—"}${a.pasto ? " · 📍"+a.pasto : ""} ${a.dg && a.dg!=="Não se aplica" ? "· "+a.dg : ""}${a.confirmado ? ' · 🔒 conferido' : ' · ⏳ pendente'}</div>
         </div>
         <div class="peso">${a.peso||"—"}<span style="font-size:11px;font-weight:600;"> kg</span></div>
@@ -2709,11 +2815,10 @@ document.getElementById('btn-wiz-back').addEventListener('click', ()=>{
 document.getElementById('btn-wiz-next').addEventListener('click', async ()=>{
   const steps = activeSteps();
   const step = steps[wiz.idx];
-  const errEl = () => document.getElementById('step-err');
 
   if(step.key !== 'revisar'){
     const err = validateStep(step.key);
-    if(err){ if(errEl()) errEl().textContent = err; return; }
+    if(err){ setStepErr(err); return; }
 
     // checagem de duplicidade: ID Antigo (passo "ordem") e ID (passo "id") — únicos pra sempre, em qualquer fazenda-dia
     if(step.key === 'ordem' && wiz.data.idAntigo){
@@ -2723,7 +2828,7 @@ document.getElementById('btn-wiz-next').addEventListener('click', async ()=>{
       catch(e){ console.warn('Erro ao checar duplicidade de ID Antigo — seguindo sem bloquear:', e); }
       finally{ setLoading(false); }
       if(dup){
-        if(errEl()) errEl().textContent = `⚠ Já existe um animal com ID Antigo ${wiz.data.idAntigo} ${descreverDuplicata(dup)}. Esse número não pode repetir. Corrija pra continuar.`;
+        setStepErr(`⚠ Já existe um animal com ID Antigo ${wiz.data.idAntigo} ${descreverDuplicata(dup)}. Esse número não pode repetir. Corrija pra continuar.`);
         return;
       }
     }
@@ -2734,11 +2839,12 @@ document.getElementById('btn-wiz-next').addEventListener('click', async ()=>{
       catch(e){ console.warn('Erro ao checar duplicidade de ID — seguindo sem bloquear:', e); }
       finally{ setLoading(false); }
       if(dup){
-        if(errEl()) errEl().textContent = `⚠ Já existe um animal com ID ${wiz.data.id} ${descreverDuplicata(dup)}. Esse ID é único e não pode repetir. Corrija pra continuar.`;
+        setStepErr(`⚠ Já existe um animal com ID ${wiz.data.id} ${descreverDuplicata(dup)}. Esse ID é único e não pode repetir. Corrija pra continuar.`);
         return;
       }
     }
 
+    setStepErr(null);
     wiz.idx++;
     renderWizard();
     return;
@@ -2870,7 +2976,7 @@ function validateStep(key){
 /* ---- STEP RENDERERS ---- */
 function stepWrap(title, sub, innerHtml){
   const div = document.createElement('div');
-  div.innerHTML = `<h1 class="page-title">${title}</h1>${sub?`<p class="page-sub">${sub}</p>`:''}${innerHtml}<div id="step-err" class="err-msg"></div>`;
+  div.innerHTML = `<h1 class="page-title">${title}</h1>${sub?`<p class="page-sub">${sub}</p>`:''}<div id="step-err" class="err-banner hide"></div>${innerHtml}`;
   return div;
 }
 
@@ -2879,8 +2985,8 @@ function ultimosAnimaisCadastrados(n){
     .filter(a => a.docId !== wiz.editingId)
     .slice()
     .sort((a,b)=>{
-      const ta = a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0;
-      const tb = b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : 0;
+      const ta = millisOf(a.createdAt);
+      const tb = millisOf(b.createdAt);
       if(tb !== ta) return tb - ta;
       return (b.ordem||0) - (a.ordem||0);
     })
@@ -3621,6 +3727,9 @@ async function applyAdminScope(){
   // ao trocar de fazenda, seleciona todos os retiros dela por padrão
   const retiros = adminFazendas.filter(f=>(f.farmGroupKey||f.id)===adminScopeKey);
   selectedRetiros = new Set(retiros.map(r=> r.retiro || 'Sede'));
+  // limpa a busca de edição — os resultados eram de outra fazenda
+  const buscaEdicao = document.getElementById('admin-edit-search');
+  if(buscaEdicao){ buscaEdicao.value = ""; document.getElementById('admin-edit-search-results').innerHTML = ""; }
   await loadAdminScopedAnimals();
 }
 
@@ -3790,6 +3899,8 @@ async function loadAdminScopedAnimals(){
       adminAllAnimals = snap.docs.map(d=>({ docId:d.id, ...d.data() }));
       renderRetiroChecklist();
       applyRetiroFilterAndRender();
+      const buscaEdicao = document.getElementById('admin-edit-search');
+      if(buscaEdicao && buscaEdicao.value.trim()) renderAdminEditSearchResults();
     }, err=>{ console.error(err); });
   } finally { setLoading(false); }
 }
@@ -4349,6 +4460,146 @@ function renderAdminFeed(lista){
     </div>`;
   }).join("");
 }
+
+/* ============================================================
+   EDITAR ANIMAL PELO ADMIN — corrige qualquer cadastro (mesmo já
+   conferido) direto pelo painel, sem passar pelo wizard. Protegido
+   por senha simples antes de abrir a edição.
+   ============================================================ */
+const SENHA_EDICAO_ADMIN = '369258';
+document.getElementById('admin-edit-search').addEventListener('input', renderAdminEditSearchResults);
+function renderAdminEditSearchResults(){
+  const wrap = document.getElementById('admin-edit-search-results');
+  const q = document.getElementById('admin-edit-search').value.trim().toLowerCase();
+  if(!q){ wrap.innerHTML = ""; return; }
+  const lista = adminAllAnimals.filter(a =>
+    String(a.id||"").toLowerCase().includes(q) ||
+    String(a.ordem||"").toLowerCase().includes(q) ||
+    String(a.idAntigo||"").toLowerCase().includes(q)
+  ).slice(0, 25);
+  if(!lista.length){ wrap.innerHTML = `<div class="empty-state" style="padding:16px 10px;">Nenhum animal encontrado.</div>`; return; }
+  wrap.innerHTML = lista.map(a=>`
+    <div class="animal-row" style="cursor:default;">
+      <div class="id-block">
+        <div class="tagid">#${a.ordem} · ID ${a.id}</div>
+        <div class="meta">${a.categoria||"—"} · ${a.raca||"—"}${a.pasto?" · 📍"+a.pasto:""} · ${formatDataBR(a.dataTrabalho)}${a.confirmado?' · 🔒 conferido':' · ⏳ pendente'} · ${a.retiro||'Sede'}</div>
+      </div>
+      <span class="edit" data-admin-edit="${a.docId}">editar ✎</span>
+    </div>`).join("");
+  wrap.querySelectorAll('[data-admin-edit]').forEach(el=>{
+    el.addEventListener('click', ()=> pedirSenhaEEditarAnimal(el.dataset.adminEdit));
+  });
+}
+function pedirSenhaEEditarAnimal(docId){
+  const senha = prompt('Digite a senha para editar este animal:');
+  if(senha === null) return; // cancelou
+  if(senha !== SENHA_EDICAO_ADMIN){ toast('Senha incorreta.'); return; }
+  abrirEdicaoAdminAnimal(docId);
+}
+let adminEditingAnimalId = null;
+function atualizarCamposEdicaoAdmin(){
+  const cat = document.getElementById('ae-categoria').value;
+  const ehBezerro = cat === 'Bezerro' || cat === 'Bezerra';
+  document.getElementById('ae-status-bezerro-field').classList.toggle('hide', !ehBezerro);
+  const sexo = document.getElementById('ae-sexo').value;
+  const dg = document.getElementById('ae-dg').value;
+  const ehFemea = sexo === 'Fêmea';
+  document.getElementById('ae-dg-field').classList.toggle('hide', !ehFemea);
+  const prenhe = dg === 'Prenhe IATF' || dg === 'Prenhe Touro';
+  const vazia = dg === 'Vazia';
+  document.getElementById('ae-idadegest-field').classList.toggle('hide', !prenhe);
+  document.getElementById('ae-paridade-field').classList.toggle('hide', !(prenhe||vazia));
+}
+function abrirEdicaoAdminAnimal(docId){
+  const a = adminAllAnimals.find(x=>x.docId===docId);
+  if(!a){ toast('Animal não encontrado.'); return; }
+  adminEditingAnimalId = docId;
+  document.getElementById('ae-err').classList.add('hide');
+  document.getElementById('admin-edit-sublabel').textContent =
+    `${a.fazendaNome||''}${a.retiro?' — '+a.retiro:''} · #${a.ordem}${a.confirmado?' · 🔒 conferido':''}`;
+  document.getElementById('ae-ordem').value = a.ordem!==undefined ? a.ordem : "";
+  document.getElementById('ae-id').value = a.id||"";
+  document.getElementById('ae-idantigo').value = a.idAntigo||"";
+  document.getElementById('ae-peso').value = a.peso||"";
+  document.getElementById('ae-pasto').value = a.pasto||"";
+  document.getElementById('ae-raca').value = a.raca||"Nelore";
+  document.getElementById('ae-categoria').value = a.categoria||"Bezerro";
+  document.getElementById('ae-status-bezerro').value = a.statusBezerro||"";
+  document.getElementById('ae-sexo').value = a.sexo||"Macho";
+  document.getElementById('ae-nascimento').value = (a.mesNasc && a.anoNasc) ? `${String(a.mesNasc).padStart(2,'0')}/${String(a.anoNasc).slice(-2)}` : "";
+  document.getElementById('ae-dg').value = a.dg||"Não se aplica";
+  document.getElementById('ae-idadegest').value = a.idadeGestacional||"";
+  document.getElementById('ae-paridade').value = a.paridade||"";
+  document.getElementById('ae-data').value = a.dataTrabalho||"";
+  document.getElementById('ae-obs').value = a.obs||"";
+  atualizarCamposEdicaoAdmin();
+  show('modal-admin-edit');
+}
+document.getElementById('ae-categoria').addEventListener('change', ()=>{
+  const cat = document.getElementById('ae-categoria').value;
+  if(SEXO_POR_CATEGORIA[cat]) document.getElementById('ae-sexo').value = SEXO_POR_CATEGORIA[cat];
+  atualizarCamposEdicaoAdmin();
+});
+document.getElementById('ae-sexo').addEventListener('change', atualizarCamposEdicaoAdmin);
+document.getElementById('ae-dg').addEventListener('change', atualizarCamposEdicaoAdmin);
+document.getElementById('btn-ae-cancel').addEventListener('click', ()=>{
+  hide('modal-admin-edit');
+  adminEditingAnimalId = null;
+});
+document.getElementById('btn-ae-save').addEventListener('click', async ()=>{
+  const docId = adminEditingAnimalId;
+  if(!docId) return;
+  const errEl = document.getElementById('ae-err');
+  errEl.classList.add('hide');
+  const idVal = document.getElementById('ae-id').value.trim();
+  if(!idVal){ errEl.textContent = "Informe o ID do animal."; errEl.classList.remove('hide'); return; }
+  const nascVal = document.getElementById('ae-nascimento').value.trim();
+  let mesNasc = "", anoNasc = "", idadeMeses = "";
+  const nm = nascVal.match(/^(\d{1,2})\/(\d{2})$/);
+  if(nm){
+    mesNasc = Number(nm[1]);
+    anoNasc = 2000 + Number(nm[2]);
+    idadeMeses = calcIdadeMeses(mesNasc, anoNasc);
+  }
+  const pesoNum = Number(document.getElementById('ae-peso').value) || 0;
+  const payload = {
+    ordem: Number(document.getElementById('ae-ordem').value) || 0,
+    id: idVal,
+    idAntigo: document.getElementById('ae-idantigo').value.trim(),
+    peso: pesoNum,
+    pasto: document.getElementById('ae-pasto').value.trim(),
+    raca: document.getElementById('ae-raca').value,
+    categoria: document.getElementById('ae-categoria').value,
+    statusBezerro: document.getElementById('ae-status-bezerro').value,
+    sexo: document.getElementById('ae-sexo').value,
+    mesNasc, anoNasc, idadeMeses,
+    dg: document.getElementById('ae-dg').value,
+    idadeGestacional: document.getElementById('ae-idadegest').value,
+    paridade: document.getElementById('ae-paridade').value.trim(),
+    dataTrabalho: document.getElementById('ae-data').value,
+    obs: document.getElementById('ae-obs').value,
+    apartacao: faixaApartacao(pesoNum),
+    updatedAt: firebase.firestore.Timestamp.now(),
+    updatedBy: currentUser.uid
+  };
+  setLoading(true);
+  try{
+    await db.collection('animais').doc(docId).update(payload);
+    const idxA = adminAllAnimals.findIndex(x=>x.docId===docId);
+    if(idxA>-1) adminAllAnimals[idxA] = { ...adminAllAnimals[idxA], ...payload };
+    const idxB = animals.findIndex(x=>x.docId===docId);
+    if(idxB>-1) animals[idxB] = { ...animals[idxB], ...payload };
+    toast('Animal atualizado.');
+    hide('modal-admin-edit');
+    adminEditingAnimalId = null;
+    renderAdminEditSearchResults();
+    applyRetiroFilterAndRender();
+  } catch(e){
+    console.error(e);
+    errEl.textContent = "Erro ao salvar as alterações. Tente de novo.";
+    errEl.classList.remove('hide');
+  } finally { setLoading(false); }
+});
 
 /* ---- auditores ---- */
 /* ---- fazendas (cadastro pelo admin) ---- */
