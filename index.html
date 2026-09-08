@@ -1037,12 +1037,13 @@ body.login-mode #app{background:var(--ink);}
   <div id="loading" class="loading-overlay hide">Carregando…</div>
   <div id="toast" class="toast hide"></div>
 
-  <div id="scale-popup" class="hide" style="position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:300;background:var(--ink);color:var(--white);border-radius:14px;padding:16px 18px;box-shadow:0 10px 30px rgba(0,0,0,0.35);text-align:center;min-width:240px;max-width:88%;">
-    <div style="font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:var(--dust-deep);">⚖ Peso da balança</div>
-    <div style="font-family:'Archivo Expanded',sans-serif;font-weight:900;font-size:32px;margin:4px 0 12px;" id="scale-popup-valor">—</div>
+  <div id="scale-popup" class="hide" style="position:absolute;right:14px;bottom:96px;left:auto;transform:none;z-index:300;background:var(--ink);color:var(--white);border-radius:14px;padding:14px 14px;box-shadow:0 10px 30px rgba(0,0,0,0.35);text-align:center;width:210px;max-width:60%;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:var(--dust-deep);">⚖ Peso da balança</div>
+    <div style="font-family:'Archivo Expanded',sans-serif;font-weight:900;font-size:26px;margin:4px 0 10px;" id="scale-popup-valor">—</div>
+    <button class="btn btn-primary" id="btn-scale-usar" style="background:var(--go-green);font-size:13px;padding:11px 8px;margin-bottom:8px;">OK — registrar peso</button>
     <div class="btn-row">
-      <button class="btn btn-secondary" id="btn-scale-verificar">Verificar peso</button>
-      <button class="btn btn-primary" id="btn-scale-usar" style="background:var(--go-green);">OK — registrar peso</button>
+      <button class="btn btn-secondary" id="btn-scale-verificar" style="font-size:11px;padding:9px 6px;">Verificar peso</button>
+      <button class="btn btn-secondary" id="btn-scale-ja-registrado" style="font-size:11px;padding:9px 6px;">✓ Já registrado</button>
     </div>
   </div>
 
@@ -1580,6 +1581,9 @@ function newWizard(){
     blockReason: null
   };
   if(typeof proximoPesoPreCarregado!=='undefined') proximoPesoPreCarregado = null;
+  // volta a aceitar leituras da balança pro novo animal — a supressão de "peso já
+  // registrado" vale só pro animal anterior, nunca deve carregar pro próximo
+  if(typeof pesoLeituraSuprimida!=='undefined') pesoLeituraSuprimida = false;
 }
 
 /* ============================================================
@@ -5236,6 +5240,11 @@ let ultimoPesoConfirmado = null;
 let ultimoPesoIgnorado = null;
 let ultimoPesoIgnoradoEm = 0;
 let verificandoNovoPeso = false;
+// Quando marcado, ignora QUALQUER leitura nova da balança (nem mostra o card) — usado depois
+// que o operador aperta "✓ Já registrado", pra balança não ficar te interrompendo se alguém
+// subir nela depois (ex: pra fazer um procedimento no animal já pesado). Volta a false
+// automaticamente assim que começa o próximo animal (newWizard()).
+let pesoLeituraSuprimida = false;
 
 // perfis Bluetooth (BLE) comuns em módulos usados nesse tipo de indicador — tenta um por um
 const PERFIS_BLE_CANDIDATOS = [
@@ -5490,6 +5499,7 @@ function interpretarPesoBalanca(linha){
 }
 
 function mostrarPesoCapturado(peso){
+  if(pesoLeituraSuprimida) return; // peso já foi marcado como registrado — ignora leituras extras até o próximo animal
   pesoCapturadoAtual = Math.round(peso*10)/10;
   if(pesoCapturadoAtual === ultimoPesoConfirmado) return;
   if(pesoCapturadoAtual === ultimoPesoIgnorado && Date.now() - ultimoPesoIgnoradoEm < 3000) return;
@@ -5549,6 +5559,24 @@ document.getElementById('btn-scale-verificar').addEventListener('click', ()=>{
   btn.textContent = 'Aguardando balança...';
   toast('Verificando novamente. Aguarde o peso estabilizar.');
 });
+document.getElementById('btn-scale-ja-registrado').addEventListener('click', ()=>{
+  if(ultimoPesoConfirmado == null){
+    toast('Confirme o peso com "OK" antes de marcar como já registrado.');
+    return;
+  }
+  // O peso desse animal já foi confirmado antes (botão OK) — essa leitura nova é ruído
+  // (ex: alguém subiu na balança pra fazer um procedimento). Fecha o card sem mexer no
+  // peso já salvo, e ignora qualquer leitura futura até começar o próximo animal.
+  pesoLeituraSuprimida = true;
+  pesoCapturadoAtual = null;
+  verificandoNovoPeso = false;
+  const btnVerificar = document.getElementById('btn-scale-verificar');
+  btnVerificar.disabled = false;
+  btnVerificar.textContent = 'Verificar peso';
+  document.getElementById('scale-popup').classList.add('hide');
+  toast('Ok — ignorando leituras da balança até o próximo animal.');
+});
+
 
 /* ---------- tela de abertura (logo) — some depois de 3s ---------- */
 setTimeout(()=>{
