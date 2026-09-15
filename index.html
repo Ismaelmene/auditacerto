@@ -3353,9 +3353,10 @@ function stepWrap(title, sub, innerHtml){
   return div;
 }
 
-function ultimosAnimaisCadastrados(n){
+function ultimosAnimaisCadastrados(n, field){
   return animals
     .filter(a => a.docId !== wiz.editingId)
+    .filter(a => !field || (a[field]!==undefined && a[field]!==null && String(a[field]).trim()!==""))
     .slice()
     .sort((a,b)=>{
       const ta = millisOf(a.createdAt);
@@ -3366,7 +3367,8 @@ function ultimosAnimaisCadastrados(n){
     .slice(0, n);
 }
 function renderStepIdentificacao(){
-  const recentes = ultimosAnimaisCadastrados(2);
+  const recentesId = ultimosAnimaisCadastrados(2, 'id');
+  const recentesIdAntigo = ultimosAnimaisCadastrados(2, 'idAntigo');
   const valorInicial = (wiz.data.mesNasc && wiz.data.anoNasc) ? `${String(wiz.data.mesNasc).padStart(2,'0')}/${String(wiz.data.anoNasc).slice(-2)}` : "";
   const el = stepWrap("Identificação", "Ordem automática, ID do animal, ID antigo (se tiver) e nascimento.",
     `<div class="locked-num" style="padding:12px;font-size:26px;margin-bottom:14px;">${wiz.data.ordem}<span class="lock-tag">🔒 ordem travada</span></div>
@@ -3376,18 +3378,33 @@ function renderStepIdentificacao(){
            <label>ID do animal</label>
            <input type="text" id="in-id" value="${wiz.data.id}" placeholder="Ex: 1024">
          </div>
+       </div>
+       <div class="identif-hist">
+         <div class="chip-lbl" style="margin-bottom:6px;">Últimos IDs cadastrados</div>
+         <div id="recentes-id-list">
+           ${recentesId.length ? recentesId.map(a=>`
+             <div class="identif-hist-item" data-editid="${a.docId}">
+               <div class="tagid">ID ${a.id}</div>
+               <div class="meta">#${a.ordem} · ${a.peso||'—'}kg${a.confirmado?' · 🔒 conferido':' · ✎ toque pra editar'}</div>
+             </div>`).join("")
+           : `<div class="empty-state" style="padding:10px 6px;font-size:12px;">Nenhum cadastro ainda.</div>`}
+         </div>
+       </div>
+     </div>
+     <div class="identif-row" style="margin-top:14px;">
+       <div class="identif-ids">
          <div class="field" style="margin-bottom:0;">
            <label>ID antigo (opcional)</label>
            <input type="text" id="in-idantigo" value="${wiz.data.idAntigo}" placeholder="Se já teve outro">
          </div>
        </div>
        <div class="identif-hist">
-         <div class="chip-lbl" style="margin-bottom:6px;">Últimos cadastrados</div>
-         <div id="recentes-list">
-           ${recentes.length ? recentes.map(a=>`
+         <div class="chip-lbl" style="margin-bottom:6px;">Últimos IDs antigos</div>
+         <div id="recentes-idantigo-list">
+           ${recentesIdAntigo.length ? recentesIdAntigo.map(a=>`
              <div class="identif-hist-item" data-editid="${a.docId}">
-               <div class="tagid">ID ${a.id}${a.idAntigo?' · '+a.idAntigo:''}</div>
-               <div class="meta">#${a.ordem} · ${a.peso||'—'}kg${a.confirmado?' · 🔒 conferido':' · ✎ toque pra editar'}</div>
+               <div class="tagid">${a.idAntigo}</div>
+               <div class="meta">ID atual ${a.id} · #${a.ordem}${a.confirmado?' · 🔒 conferido':' · ✎ toque pra editar'}</div>
              </div>`).join("")
            : `<div class="empty-state" style="padding:10px 6px;font-size:12px;">Nenhum cadastro ainda.</div>`}
          </div>
@@ -3439,7 +3456,10 @@ function renderStepIdentificacao(){
     inNasc.addEventListener('input', updNascimento);
     updNascimento();
 
-    document.querySelectorAll('#recentes-list [data-editid]').forEach(row=>{
+    document.querySelectorAll('#recentes-id-list [data-editid]').forEach(row=>{
+      row.addEventListener('click', ()=> abrirEdicaoRapida(row.dataset.editid));
+    });
+    document.querySelectorAll('#recentes-idantigo-list [data-editid]').forEach(row=>{
       row.addEventListener('click', ()=> abrirEdicaoRapida(row.dataset.editid));
     });
   });
