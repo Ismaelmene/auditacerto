@@ -1027,6 +1027,15 @@ body.login-mode #app{background:var(--ink);}
           <option value="Mamando">Mamando</option>
         </select>
       </div>
+      <div class="field hide" id="ae-paridade-vaca-field">
+        <label>Paridade da vaca</label>
+        <select id="ae-paridade-vaca">
+          <option value="">—</option>
+          <option value="Primípara">Primípara</option>
+          <option value="Multípara">Multípara</option>
+          <option value="Solteira">Solteira</option>
+        </select>
+      </div>
       <div class="field">
         <label>Sexo</label>
         <select id="ae-sexo">
@@ -1112,6 +1121,15 @@ body.login-mode #app{background:var(--ink);}
           <option value="">—</option>
           <option value="Desmama">Desmama</option>
           <option value="Mamando">Mamando</option>
+        </select>
+      </div>
+      <div class="field hide" id="qe-paridade-vaca-field">
+        <label>Paridade da vaca</label>
+        <select id="qe-paridade-vaca">
+          <option value="">—</option>
+          <option value="Primípara">Primípara</option>
+          <option value="Multípara">Multípara</option>
+          <option value="Solteira">Solteira</option>
         </select>
       </div>
       <div class="field">
@@ -1590,6 +1608,7 @@ let signupMode = false;
 
 const CATEGORIAS = ["Bezerro","Bezerra","Garrote","Novilha","Vaca","Boi","Touro"];
 const STATUS_BEZERRO_OPCOES = ["Desmama","Mamando"];
+const PARIDADE_VACA_OPCOES = ["Primípara","Multípara","Solteira"];
 const SEXO_POR_CATEGORIA = {
   "Bezerro":"Macho","Garrote":"Macho","Boi":"Macho","Touro":"Macho",
   "Bezerra":"Fêmea","Novilha":"Fêmea","Vaca":"Fêmea"
@@ -1721,7 +1740,7 @@ function newWizard(){
   wiz = {
     steps: buildSteps(),
     idx: 0,
-    data: { ordem:"", idAntigo:"", id:"", peso: (typeof proximoPesoPreCarregado!=='undefined' && proximoPesoPreCarregado!==null) ? proximoPesoPreCarregado : "", pasto:"", pastoManual:"", vacinasAplicadas:[], idadeMeses:"", mesNasc:"", anoNasc:"", raca:"", categoria:"", sexo:"", statusBezerro:"", dg:"", idadeGestacional:"", paridade:"", descarte:"", dataTrabalho: sessionWorkDate || todayISO(), obs:"" },
+    data: { ordem:"", idAntigo:"", id:"", peso: (typeof proximoPesoPreCarregado!=='undefined' && proximoPesoPreCarregado!==null) ? proximoPesoPreCarregado : "", pasto:"", pastoManual:"", vacinasAplicadas:[], idadeMeses:"", mesNasc:"", anoNasc:"", raca:"", categoria:"", sexo:"", statusBezerro:"", paridadeVaca:"", dg:"", idadeGestacional:"", paridade:"", descarte:"", dataTrabalho: sessionWorkDate || todayISO(), obs:"" },
     editingId: null,
     blockReason: null
   };
@@ -2800,6 +2819,7 @@ function exportRowsFrom(list){
     "Raça": a.raca,
     "Categoria": a.categoria,
     "Desmama/Mamando": a.statusBezerro||"",
+    "Paridade da Vaca": a.paridadeVaca||"",
     "Sexo": a.sexo,
     "DG": a.dg,
     "Idade Gestacional (meses)": a.idadeGestacional||"",
@@ -2992,6 +3012,8 @@ function atualizarCamposEdicaoRapida(){
   const cat = document.getElementById('qe-categoria').value;
   const ehBezerro = cat === 'Bezerro' || cat === 'Bezerra';
   document.getElementById('qe-status-bezerro-field').classList.toggle('hide', !ehBezerro);
+  const ehVaca = cat === 'Vaca';
+  document.getElementById('qe-paridade-vaca-field').classList.toggle('hide', !ehVaca);
   const sexo = document.getElementById('qe-sexo').value;
   const dg = document.getElementById('qe-dg').value;
   const ehFemea = sexo === 'Fêmea';
@@ -3015,6 +3037,7 @@ function abrirEdicaoRapida(docId){
   document.getElementById('qe-raca').value = a.raca||"Nelore";
   document.getElementById('qe-categoria').value = a.categoria||"Bezerro";
   document.getElementById('qe-status-bezerro').value = a.statusBezerro||"";
+  document.getElementById('qe-paridade-vaca').value = a.paridadeVaca||"";
   document.getElementById('qe-sexo').value = a.sexo||"Macho";
   document.getElementById('qe-dg').value = a.dg||"Não se aplica";
   document.getElementById('qe-idadegest').value = a.idadeGestacional||"";
@@ -3059,6 +3082,7 @@ document.getElementById('btn-qe-save').addEventListener('click', async ()=>{
     raca: document.getElementById('qe-raca').value,
     categoria: document.getElementById('qe-categoria').value,
     statusBezerro: document.getElementById('qe-status-bezerro').value,
+    paridadeVaca: document.getElementById('qe-paridade-vaca').value,
     sexo: document.getElementById('qe-sexo').value,
     mesNasc, anoNasc, idadeMeses,
     dg: document.getElementById('qe-dg').value,
@@ -3302,6 +3326,16 @@ document.addEventListener('keydown', (e)=>{
     }
     return;
   }
+  // se o foco estiver no card de Paridade da vaca, o número seleciona ali (não na Categoria principal)
+  if(document.activeElement && document.activeElement.closest && document.activeElement.closest('#opt-paridade-vaca')){
+    const idxParidadeVaca = Number(e.key) - 1;
+    if(idxParidadeVaca>=0 && idxParidadeVaca<PARIDADE_VACA_OPCOES.length){
+      e.preventDefault();
+      const card = document.querySelector(`#opt-paridade-vaca .opt-card[data-v="${PARIDADE_VACA_OPCOES[idxParidadeVaca]}"]`);
+      if(card){ card.click(); const btn = document.getElementById('btn-wiz-next'); if(btn && !btn.disabled) btn.click(); }
+    }
+    return;
+  }
   if(e.target && e.target.tagName === 'INPUT') return;
   const steps = activeSteps();
   const step = steps[wiz.idx];
@@ -3334,6 +3368,7 @@ function validateStep(key){
     case 'categoria':
       if(!d.categoria) return "Selecione a categoria.";
       if((d.categoria==="Bezerro"||d.categoria==="Bezerra") && !d.statusBezerro) return "Informe se está em desmama ou ainda mamando.";
+      if(d.categoria==="Vaca" && !d.paridadeVaca) return "Informe se é primípara, multípara ou solteira.";
       return null;
     case 'dg':
       if(!d.dg) return "Selecione o diagnóstico.";
@@ -3616,17 +3651,38 @@ function renderStepCategoria(){
       <div class="option-grid" id="opt-status-bezerro">
         ${STATUS_BEZERRO_OPCOES.map((s,i)=>`<div class="opt-card ${wiz.data.statusBezerro===s?'sel':''}" data-v="${s}" tabindex="0"><span class="opt-label"><span class="opt-num">${i+1}</span>${s}</span><span class="chk"></span></div>`).join("")}
       </div>
+    </div>
+    <div class="field hide" id="paridade-vaca-field" style="margin-top:16px;">
+      <label>Paridade da vaca</label>
+      <div class="option-grid" id="opt-paridade-vaca">
+        ${PARIDADE_VACA_OPCOES.map((s,i)=>`<div class="opt-card ${wiz.data.paridadeVaca===s?'sel':''}" data-v="${s}" tabindex="0"><span class="opt-label"><span class="opt-num">${i+1}</span>${s}</span><span class="chk"></span></div>`).join("")}
+      </div>
     </div>`);
   const toggleStatusBezerro = ()=>{
     const ehBezerro = wiz.data.categoria === "Bezerro" || wiz.data.categoria === "Bezerra";
     document.getElementById('status-bezerro-field').classList.toggle('hide', !ehBezerro);
     if(!ehBezerro) wiz.data.statusBezerro = "";
   };
+  const toggleParidadeVaca = ()=>{
+    const ehVaca = wiz.data.categoria === "Vaca";
+    document.getElementById('paridade-vaca-field').classList.toggle('hide', !ehVaca);
+    if(!ehVaca) wiz.data.paridadeVaca = "";
+  };
   const bindStatusBezerroCards = ()=>{
     document.querySelectorAll('#opt-status-bezerro .opt-card').forEach(card=>{
       card.addEventListener('click', ()=>{
         wiz.data.statusBezerro = card.dataset.v;
         document.querySelectorAll('#opt-status-bezerro .opt-card').forEach(c=>c.classList.remove('sel'));
+        card.classList.add('sel');
+        card.focus();
+      });
+    });
+  };
+  const bindParidadeVacaCards = ()=>{
+    document.querySelectorAll('#opt-paridade-vaca .opt-card').forEach(card=>{
+      card.addEventListener('click', ()=>{
+        wiz.data.paridadeVaca = card.dataset.v;
+        document.querySelectorAll('#opt-paridade-vaca .opt-card').forEach(c=>c.classList.remove('sel'));
         card.classList.add('sel');
         card.focus();
       });
@@ -3642,9 +3698,14 @@ function renderStepCategoria(){
         document.querySelectorAll('#opt-cat .opt-card').forEach(c=>c.classList.remove('sel'));
         card.classList.add('sel');
         toggleStatusBezerro();
+        toggleParidadeVaca();
         const statusField = document.getElementById('status-bezerro-field');
+        const paridadeVacaField = document.getElementById('paridade-vaca-field');
         if(statusField && !statusField.classList.contains('hide')){
           const primeiroCard = document.querySelector('#opt-status-bezerro .opt-card');
+          if(primeiroCard) primeiroCard.focus(); else card.focus();
+        } else if(paridadeVacaField && !paridadeVacaField.classList.contains('hide')){
+          const primeiroCard = document.querySelector('#opt-paridade-vaca .opt-card');
           if(primeiroCard) primeiroCard.focus(); else card.focus();
         } else {
           card.focus();
@@ -3652,7 +3713,9 @@ function renderStepCategoria(){
       });
     });
     bindStatusBezerroCards();
+    bindParidadeVacaCards();
     toggleStatusBezerro();
+    toggleParidadeVaca();
   });
   return el;
 }
@@ -3781,6 +3844,9 @@ function renderStepRevisar(){
   ];
   if(d.categoria==="Bezerro"||d.categoria==="Bezerra"){
     rows.splice(rows.findIndex(r=>r.k==="Sexo")+1, 0, { k:"Desmama/Mamando", v:d.statusBezerro||"—", step:"categoria" });
+  }
+  if(d.categoria==="Vaca"){
+    rows.splice(rows.findIndex(r=>r.k==="Sexo")+1, 0, { k:"Paridade da vaca", v:d.paridadeVaca||"—", step:"categoria" });
   }
   if(d.dg==="Prenhe IATF"||d.dg==="Prenhe Touro"){
     rows.push({ k:"Idade gestacional", v:(d.idadeGestacional||"—")+" meses", step:"dg" });
@@ -3976,6 +4042,7 @@ async function salvarAnimal(){
     categoria: d.categoria,
     sexo: d.sexo,
     statusBezerro: d.statusBezerro || "",
+    paridadeVaca: d.paridadeVaca || "",
     dg: d.dg || "Não se aplica",
     idadeGestacional: d.idadeGestacional || "",
     paridade: d.paridade || "",
@@ -4950,6 +5017,8 @@ function atualizarCamposEdicaoAdmin(){
   const cat = document.getElementById('ae-categoria').value;
   const ehBezerro = cat === 'Bezerro' || cat === 'Bezerra';
   document.getElementById('ae-status-bezerro-field').classList.toggle('hide', !ehBezerro);
+  const ehVaca = cat === 'Vaca';
+  document.getElementById('ae-paridade-vaca-field').classList.toggle('hide', !ehVaca);
   const sexo = document.getElementById('ae-sexo').value;
   const dg = document.getElementById('ae-dg').value;
   const ehFemea = sexo === 'Fêmea';
@@ -4974,6 +5043,7 @@ function abrirEdicaoAdminAnimal(docId){
   document.getElementById('ae-raca').value = a.raca||"Nelore";
   document.getElementById('ae-categoria').value = a.categoria||"Bezerro";
   document.getElementById('ae-status-bezerro').value = a.statusBezerro||"";
+  document.getElementById('ae-paridade-vaca').value = a.paridadeVaca||"";
   document.getElementById('ae-sexo').value = a.sexo||"Macho";
   document.getElementById('ae-nascimento').value = (a.mesNasc && a.anoNasc) ? `${String(a.mesNasc).padStart(2,'0')}/${String(a.anoNasc).slice(-2)}` : "";
   document.getElementById('ae-dg').value = a.dg||"Não se aplica";
@@ -5021,6 +5091,7 @@ document.getElementById('btn-ae-save').addEventListener('click', async ()=>{
     raca: document.getElementById('ae-raca').value,
     categoria: document.getElementById('ae-categoria').value,
     statusBezerro: document.getElementById('ae-status-bezerro').value,
+    paridadeVaca: document.getElementById('ae-paridade-vaca').value,
     sexo: document.getElementById('ae-sexo').value,
     mesNasc, anoNasc, idadeMeses,
     dg: document.getElementById('ae-dg').value,
@@ -5396,6 +5467,7 @@ document.getElementById('btn-importar-operacao').addEventListener('click', async
       "Raça": getCol(headerRow, r, "Raça"),
       "Categoria": getCol(headerRow, r, "Categoria"),
       "Desmama/Mamando": getCol(headerRow, r, "Desmama/Mamando"),
+      "Paridade da Vaca": getCol(headerRow, r, "Paridade da Vaca"),
       "Sexo": getCol(headerRow, r, "Sexo"),
       "DG": getCol(headerRow, r, "DG"),
       "Idade Gestacional (meses)": getCol(headerRow, r, "Idade Gestacional (meses)", "Idade Gestacional"),
@@ -5462,6 +5534,7 @@ document.getElementById('btn-importar-operacao').addEventListener('click', async
         raca: String(row["Raça"] || ""),
         categoria: String(row["Categoria"] || ""),
         statusBezerro: String(row["Desmama/Mamando"] || ""),
+        paridadeVaca: String(row["Paridade da Vaca"] || ""),
         sexo: String(row["Sexo"] || ""),
         dg: String(row["DG"] || "Não se aplica"),
         idadeGestacional: row["Idade Gestacional (meses)"] || "",
