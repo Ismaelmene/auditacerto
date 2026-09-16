@@ -492,7 +492,6 @@ body.login-mode #app{background:var(--ink);}
       <span id="sync-badge-text"></span>
       <span style="display:flex;gap:8px;flex-shrink:0;">
         <button id="btn-sync-agora" class="btn btn-secondary" style="padding:6px 12px;font-size:11.5px;">🔄 Sincronizar agora</button>
-        <button id="btn-sync-descartar" class="btn btn-secondary" style="padding:6px 12px;font-size:11.5px;color:var(--alert);">🗑 Descartar</button>
       </span>
     </div>
     <div id="conflict-badge" class="hide" style="margin:0 20px 10px;padding:10px 14px;background:var(--alert-bg);color:var(--alert);font-size:12.5px;font-weight:700;border-radius:9px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
@@ -1319,15 +1318,25 @@ async function flushOutbox(){
   if(!list.length) return;
   for(const item of list){
     try{
-      const resultado = await Promise.race([
-        db.collection('animais').doc(item.docId).set(item.payload, {merge:true}).then(()=> 'ok'),
-        new Promise(resolve=> setTimeout(()=> resolve('timeout'), 20000))
-      ]);
-      if(resultado === 'ok'){
+      const writePromise = db.collection('animais').doc(item.docId).set(item.payload, {merge:true});
+      // Mesmo que o tempo limite abaixo estoure, essa gravação continua tentando em segundo
+      // plano — se ela terminar com sucesso mais tarde (conexão lenta, não morta), ainda assim
+      // tira o item da fila quando resolver. Sem isso, um item que na verdade FOI salvo ficava
+      // pendurado pra sempre como "pendente", o que é perigoso: é exatamente esse acúmulo de
+      // pendências que leva alguém a apertar "Descartar" — e descartar um item que já foi salvo
+      // não tem problema, mas descartar um que só PARECIA salvo (por causa desse bug) perderia
+      // cadastro de verdade.
+      writePromise.then(async ()=>{
         removeFromOutbox(item.docId);
         await checkForConflict(item.docId, item.payload);
-      } else {
-        console.warn('[Sincronização] Tempo esgotado tentando salvar', item.docId);
+      }).catch(()=>{ /* segue na fila, a próxima rodada de sincronização tenta de novo */ });
+
+      const resultado = await Promise.race([
+        writePromise.then(()=> 'ok').catch(()=> 'erro'),
+        new Promise(resolve=> setTimeout(()=> resolve('timeout'), 30000))
+      ]);
+      if(resultado === 'timeout'){
+        console.warn('[Sincronização] Tempo esgotado tentando salvar', item.docId, '— continua tentando sozinho em segundo plano.');
       }
     } catch(e){
       console.error('[Sincronização] Erro ao salvar', item.docId, '→', e.code || e.message || e);
@@ -1543,15 +1552,6 @@ document.getElementById('btn-sync-agora').addEventListener('click', async ()=>{
   updatePendingSyncBadge();
   const restante = getOutbox().length + getLoteOutbox().length + getDeleteOutbox().length;
   toast(restante ? `Ainda restam ${restante} — abra o console (F12) pra ver o motivo do erro.` : '✅ Tudo sincronizado!');
-});
-document.getElementById('btn-sync-descartar').addEventListener('click', ()=>{
-  const n = getOutbox().length + getLoteOutbox().length + getDeleteOutbox().length;
-  if(!confirm(`Isso descarta ${n} registro(s) que ainda não foram salvos no banco de dados — útil se eles eram de uma fazenda que você já apagou. Se algum desses ainda for de uma fazenda que existe, ele será perdido de vez. Confirma?`)) return;
-  setOutbox([]);
-  setLoteOutbox([]);
-  setDeleteOutbox([]);
-  updatePendingSyncBadge();
-  toast('Fila descartada.');
 });
 let conflitosAbertosCache = [];
 async function checkConflictsProactively(){
@@ -2026,7 +2026,35 @@ async function loadAnimals(){
         else animals.push({ ...item.payload, docId: item.docId });
       }
     });
+
+    avisarSeContagemCaiu();
   } finally { setLoading(false); }
+}
+
+/* ============================================================
+   ALARME DE QUEDA DE CONTAGEM — guarda, por fazenda, o maior número
+   de animais já visto localmente. Se um carregamento posterior vier
+   MENOR que isso (fora uma pequena margem, pra não disparar por causa
+   de exclusões manuais legítimas), avisa bem visível — é o tipo de
+   sinal que detectaria na hora um problema de sincronização/fila
+   descartada sem querer, em vez do auditor só perceber dias depois.
+   ============================================================ */
+function avisarSeContagemCaiu(){
+  if(!currentFarm) return;
+  try{
+    const key = `auditaboi_maxcount_${currentFarm.id}`;
+    const maxAnterior = Number(localStorage.getItem(key)) || 0;
+    const totalAgora = animals.length;
+    if(totalAgora > maxAnterior){
+      localStorage.setItem(key, String(totalAgora));
+    } else if(maxAnterior - totalAgora >= 3){
+      alert(
+        `⚠ ATENÇÃO — o número de animais dessa fazenda caiu de ${maxAnterior} pra ${totalAgora} desde a última vez que foi carregado aqui.\n\n` +
+        `Se ninguém apagou animais de propósito, isso pode ser um problema de sincronização (ex: fila de envio descartada por engano). ` +
+        `Antes de continuar auditando, confira a lista e, se precisar, entre em contato com o suporte pra investigar antes que se perca mais coisa.`
+      );
+    }
+  } catch(e){ /* localStorage indisponível — segue sem esse alarme */ }
 }
 
 /* ============================================================
@@ -2117,9 +2145,16 @@ function renderHome(){
   const combos = [];
   CATEGORIAS.forEach(cat=>{
     RACAS.forEach(raca=>{
-      const n = animals.filter(a=>a.categoria===cat && a.raca===raca).length;
+      // animais marcados como descarte saem da contagem da categoria original e entram
+      // na barra "Descarte" logo abaixo — continuam 100% registrados e contados no total,
+      // só mudam de grupo nesse gráfico (igual mudaria de Bezerro pra Garrote, por exemplo)
+      const n = animals.filter(a=>a.descarte!=='Sim' && a.categoria===cat && a.raca===raca).length;
       if(n>0) combos.push({ label: `${cat} ${raca}`, n });
     });
+  });
+  RACAS.forEach(raca=>{
+    const n = animals.filter(a=>a.descarte==='Sim' && a.raca===raca).length;
+    if(n>0) combos.push({ label: `Descarte ${raca}`, n });
   });
   if(!combos.length){
     catBars.innerHTML = `<div class="empty-state" style="padding:16px 10px;">Nenhum animal cadastrado ainda.</div>`;
@@ -3795,7 +3830,10 @@ function renderStepDG(){
 function renderStepData(){
   const el = stepWrap("Data de trabalho", "Data em que este animal foi auditado.",
     `<div class="field"><input type="date" id="in-data" value="${wiz.data.dataTrabalho}"></div>`);
-  setTimeout(()=> document.getElementById('in-data').addEventListener('input', e=> wiz.data.dataTrabalho = e.target.value));
+  setTimeout(()=>{
+    const inData = document.getElementById('in-data');
+    if(inData) inData.addEventListener('input', e=> wiz.data.dataTrabalho = e.target.value);
+  });
   return el;
 }
 
@@ -3822,7 +3860,10 @@ function renderStepDescarte(){
 function renderStepObs(){
   const el = stepWrap("Observações", "Opcional.",
     `<div class="field"><textarea id="in-obs" placeholder="Alguma observação sobre o animal...">${wiz.data.obs}</textarea></div>`);
-  setTimeout(()=> document.getElementById('in-obs').addEventListener('input', e=> wiz.data.obs = e.target.value));
+  setTimeout(()=>{
+    const inObs = document.getElementById('in-obs');
+    if(inObs) inObs.addEventListener('input', e=> wiz.data.obs = e.target.value);
+  });
   return el;
 }
 
@@ -3925,12 +3966,13 @@ function removeFromLoteOutbox(loteId){ setLoteOutbox(getLoteOutbox().filter(x=>x
 async function flushLoteOutbox(){
   for(const item of getLoteOutbox()){
     try{
+      const writePromise = db.collection('lotes').doc(item.loteId).set(item.loteData, { merge:true });
+      writePromise.then(()=> removeFromLoteOutbox(item.loteId)).catch(()=>{});
       const resultado = await Promise.race([
-        db.collection('lotes').doc(item.loteId).set(item.loteData, { merge:true }).then(()=> 'ok'),
-        new Promise(resolve=> setTimeout(()=> resolve('timeout'), 20000))
+        writePromise.then(()=> 'ok').catch(()=> 'erro'),
+        new Promise(resolve=> setTimeout(()=> resolve('timeout'), 30000))
       ]);
-      if(resultado === 'ok') removeFromLoteOutbox(item.loteId);
-      else console.warn('[Sincronização] Tempo esgotado tentando salvar lote', item.loteId);
+      if(resultado === 'timeout') console.warn('[Sincronização] Tempo esgotado tentando salvar lote', item.loteId, '— continua tentando sozinho em segundo plano.');
     } catch(e){
       console.error('[Sincronização] Erro ao salvar lote', item.loteId, '→', e.code || e.message || e);
     }
@@ -3943,12 +3985,13 @@ function removeFromDeleteOutbox(docId){ setDeleteOutbox(getDeleteOutbox().filter
 async function flushDeleteOutbox(){
   for(const docId of getDeleteOutbox()){
     try{
+      const delPromise = db.collection('animais').doc(docId).delete();
+      delPromise.then(()=> removeFromDeleteOutbox(docId)).catch(()=>{});
       const resultado = await Promise.race([
-        db.collection('animais').doc(docId).delete().then(()=> 'ok'),
-        new Promise(resolve=> setTimeout(()=> resolve('timeout'), 20000))
+        delPromise.then(()=> 'ok').catch(()=> 'erro'),
+        new Promise(resolve=> setTimeout(()=> resolve('timeout'), 30000))
       ]);
-      if(resultado === 'ok') removeFromDeleteOutbox(docId);
-      else console.warn('[Sincronização] Tempo esgotado tentando excluir', docId);
+      if(resultado === 'timeout') console.warn('[Sincronização] Tempo esgotado tentando excluir', docId, '— continua tentando sozinho em segundo plano.');
     } catch(e){
       console.error('[Sincronização] Erro ao excluir', docId, '→', e.code || e.message || e);
     }
@@ -4448,7 +4491,10 @@ function agruparPorTexto(lista, getValor){
   return mapa;
 }
 function computeChartsData(lista){
-  const catCombos = agruparPorTexto(lista, a => `${a.categoria||'—'} ${a.raca||''} ${a.sexo||''}`);
+  // animais marcados como descarte contam na categoria "Descarte" nesse gráfico, em vez da
+  // categoria original (Vaca/Boi/etc) — continuam registrados e contados no total normalmente,
+  // só mudam de grupo aqui, pra ficar visível quantos animais foram destinados a descarte
+  const catCombos = agruparPorTexto(lista, a => a.descarte==='Sim' ? `Descarte ${a.raca||''}`.trim() : `${a.categoria||'—'} ${a.raca||''} ${a.sexo||''}`);
   const sexoCombos = { "Macho":0, "Fêmea":0 };
   lista.forEach(a=>{
     const n = normSemAcento(a.sexo);
