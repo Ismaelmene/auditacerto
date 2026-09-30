@@ -242,6 +242,8 @@ body.login-mode #app{background:var(--ink);}
 .review-row .k{color:var(--ink-soft);font-weight:600;}
 .review-row .v{font-weight:700;font-family:'IBM Plex Mono';}
 .review-row .edit{color:var(--hide-dark);font-weight:700;font-size:12.5px;margin-left:8px;cursor:pointer;font-family:'Inter';}
+.edit-id{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-decoration-color:var(--hide-dark);text-underline-offset:2px;}
+.edit-id:active{color:var(--hide-dark);}
 .review-row.editable{cursor:pointer;}
 .review-row.editable:active{background:#f7efdf;}
 
@@ -893,6 +895,26 @@ body.login-mode #app{background:var(--ink);}
 
       <!-- ADICIONAR OPERAÇÃO -->
       <div id="admin-operacao-view" class="hide">
+        <div class="review-card" style="margin-bottom:22px;border-color:var(--alert);">
+          <div class="review-row"><span class="k" style="font-weight:900;color:var(--alert);">🗑 Excluir manejo do dia</span></div>
+          <p class="page-sub" style="margin:6px 0 12px;">Apaga todos os animais auditados numa fazenda/retiro, numa data específica — pra corrigir um manejo errado antes de importar a planilha certa logo abaixo. Não afeta nenhuma outra data.</p>
+          <div class="field">
+            <label>Fazenda</label>
+            <select id="excluir-manejo-fazenda-select"></select>
+          </div>
+          <div class="field">
+            <label>Retiro</label>
+            <select id="excluir-manejo-retiro-select"></select>
+          </div>
+          <div class="field">
+            <label>Data do manejo</label>
+            <input type="date" id="excluir-manejo-data">
+          </div>
+          <button class="btn btn-secondary" id="btn-conferir-manejo" style="margin-bottom:10px;">🔍 Conferir quantos animais seriam apagados</button>
+          <div id="excluir-manejo-preview" class="hide" style="margin-bottom:10px;"></div>
+          <button class="btn btn-secondary hide" id="btn-excluir-manejo" style="color:var(--alert);border-color:var(--alert);">🗑 Excluir esse manejo</button>
+        </div>
+
         <p class="page-sub" style="margin-top:-6px;">Importe uma planilha de animais já auditados de uma fazenda/retiro pra compilar no sistema. Duplicidade de ID é cruzada automaticamente pelo nome da fazenda.</p>
         <div class="field">
           <label>Fazenda</label>
@@ -1269,7 +1291,7 @@ function detectarErroCriticoFirestore(erro){
 window.addEventListener('unhandledrejection', (event)=> detectarErroCriticoFirestore(event.reason));
 window.addEventListener('error', (event)=> detectarErroCriticoFirestore(event.error));
 
-const ADMIN_EMAIL = "menezesapptec@gmail.com";
+const ADMIN_EMAILS = ["menezesapptec@gmail.com", "michel.gestpec@gmail.com", "kuiava.vet@gmail.com"];
 // app secundário: usado só pra criar contas de auditores sem deslogar o admin da sessão principal
 const secondaryApp = firebase.initializeApp(firebaseConfig, "Secondary");
 const secondaryAuth = secondaryApp.auth();
@@ -1783,7 +1805,7 @@ document.getElementById('btn-login').addEventListener('click', async ()=>{
   const errEl = document.getElementById('login-err');
   errEl.classList.add('hide');
   if(!email || !pass){ errEl.textContent="Preencha e-mail e senha."; errEl.classList.remove('hide'); return; }
-  if(signupMode && email.toLowerCase() !== ADMIN_EMAIL){
+  if(signupMode && !ADMIN_EMAILS.includes(email.toLowerCase())){
     errEl.textContent = "Novas contas só podem ser criadas pelo administrador.";
     errEl.classList.remove('hide');
     return;
@@ -1825,7 +1847,7 @@ let isAdmin = false;
 auth.onAuthStateChanged(async (user)=>{
   if(user){
     currentUser = user;
-    if(user.email && user.email.toLowerCase() === ADMIN_EMAIL){
+    if(user.email && ADMIN_EMAILS.includes(user.email.toLowerCase())){
       isAdmin = true;
       goScreen('admin');
       await renderAdmin();
@@ -4182,7 +4204,104 @@ document.getElementById('atab-visao').addEventListener('click', ()=> switchAdmin
 document.getElementById('atab-fazendas').addEventListener('click', ()=>{ switchAdminTab('fazendas'); renderAdminFazendasList(); });
 document.getElementById('atab-auditores').addEventListener('click', ()=>{ switchAdminTab('auditores'); renderAuditoresList(); });
 document.getElementById('atab-conflitos').addEventListener('click', ()=>{ switchAdminTab('conflitos'); renderAdminConflitosList(); });
-document.getElementById('atab-operacao').addEventListener('click', ()=>{ switchAdminTab('operacao'); renderOperacaoFazendaSelect(); });
+document.getElementById('atab-operacao').addEventListener('click', ()=>{ switchAdminTab('operacao'); renderOperacaoFazendaSelect(); renderExcluirManejoFazendaSelect(); });
+
+/* ============================================================
+   EXCLUIR MANEJO DO DIA — apaga todos os animais de uma fazenda/
+   retiro numa data específica, pra corrigir um manejo errado antes
+   de importar a planilha certa (logo abaixo, na mesma aba). Exige
+   conferir a quantidade antes, e digitar APAGAR pra confirmar.
+   ============================================================ */
+function renderExcluirManejoFazendaSelect(){
+  const sel = document.getElementById('excluir-manejo-fazenda-select');
+  const porGrupo = {};
+  adminFazendas.forEach(f=>{
+    const key = f.farmGroupKey || f.id;
+    if(!porGrupo[key]) porGrupo[key] = { nome: f.nome, key };
+  });
+  const opcoes = Object.values(porGrupo).sort((a,b)=>a.nome.localeCompare(b.nome));
+  sel.innerHTML = opcoes.length ? opcoes.map(f=>`<option value="${f.key}">${f.nome}</option>`).join("") : `<option value="">Nenhuma fazenda cadastrada</option>`;
+  atualizarRetiroExcluirManejo();
+}
+function atualizarRetiroExcluirManejo(){
+  const val = document.getElementById('excluir-manejo-fazenda-select').value;
+  const selRetiro = document.getElementById('excluir-manejo-retiro-select');
+  const retiros = adminFazendas.filter(f=>(f.farmGroupKey||f.id)===val);
+  selRetiro.innerHTML = retiros.length ? retiros.map(r=>`<option value="${(r.retiro||'').replace(/"/g,'&quot;')}">${r.retiro||'Sede'}</option>`).join("") : `<option value="">Sede</option>`;
+  document.getElementById('excluir-manejo-preview').classList.add('hide');
+  document.getElementById('btn-excluir-manejo').classList.add('hide');
+  manejoParaExcluir = null;
+}
+document.getElementById('excluir-manejo-fazenda-select').addEventListener('change', atualizarRetiroExcluirManejo);
+document.getElementById('excluir-manejo-retiro-select').addEventListener('change', ()=>{
+  document.getElementById('excluir-manejo-preview').classList.add('hide');
+  document.getElementById('btn-excluir-manejo').classList.add('hide');
+  manejoParaExcluir = null;
+});
+document.getElementById('excluir-manejo-data').addEventListener('change', ()=>{
+  document.getElementById('excluir-manejo-preview').classList.add('hide');
+  document.getElementById('btn-excluir-manejo').classList.add('hide');
+  manejoParaExcluir = null;
+});
+let manejoParaExcluir = null;
+document.getElementById('btn-conferir-manejo').addEventListener('click', async ()=>{
+  const farmGroupKeyVal = document.getElementById('excluir-manejo-fazenda-select').value;
+  const retiroVal = document.getElementById('excluir-manejo-retiro-select').value;
+  const dataVal = document.getElementById('excluir-manejo-data').value;
+  const nomeF = document.getElementById('excluir-manejo-fazenda-select').selectedOptions[0]?.textContent || '';
+  if(!farmGroupKeyVal){ toast('Selecione a fazenda.'); return; }
+  if(!dataVal){ toast('Selecione a data do manejo.'); return; }
+  setLoading(true);
+  try{
+    // só 2 campos de igualdade na consulta (evita precisar de índice composto); o retiro
+    // é filtrado aqui no navegador, em cima do resultado
+    const snap = await getSafe(db.collection('animais').where('farmGroupKey','==',farmGroupKeyVal).where('dataTrabalho','==',dataVal), 8000);
+    if(snap.uncertain){ toast('Não deu pra conferir agora (conexão instável) — tenta de novo.'); return; }
+    const docs = snap.docs.filter(d => (d.data().retiro||'') === retiroVal);
+    manejoParaExcluir = { farmGroupKey: farmGroupKeyVal, retiro: retiroVal, data: dataVal, nomeFazenda: nomeF, ids: docs.map(d=>d.id) };
+    const preview = document.getElementById('excluir-manejo-preview');
+    if(!docs.length){
+      preview.innerHTML = `<div class="pasto-hint">Nenhum animal encontrado com esse filtro — nada pra excluir.</div>`;
+      preview.classList.remove('hide');
+      document.getElementById('btn-excluir-manejo').classList.add('hide');
+    } else {
+      const confirmados = docs.filter(d=>d.data().confirmado).length;
+      preview.innerHTML = `<div class="review-card">
+        <div class="review-row"><span class="k">Fazenda</span><span class="v">${nomeF}</span></div>
+        <div class="review-row"><span class="k">Retiro</span><span class="v">${retiroVal||'Sede'}</span></div>
+        <div class="review-row"><span class="k">Data</span><span class="v">${formatDataBR(dataVal)}</span></div>
+        <div class="review-row"><span class="k">Total encontrado</span><span class="v" style="color:var(--alert);font-weight:900;">${docs.length} animais</span></div>
+        <div class="review-row"><span class="k">Já conferidos (em lote solto)</span><span class="v">${confirmados}</span></div>
+      </div>`;
+      preview.classList.remove('hide');
+      document.getElementById('btn-excluir-manejo').classList.remove('hide');
+    }
+  } catch(e){ console.error(e); toast('Erro ao conferir.'); }
+  finally { setLoading(false); }
+});
+document.getElementById('btn-excluir-manejo').addEventListener('click', async ()=>{
+  if(!manejoParaExcluir || !manejoParaExcluir.ids.length) return;
+  const { ids, data, retiro, nomeFazenda } = manejoParaExcluir;
+  const passo1 = confirm(`Isso apaga ${ids.length} animal(is) auditado(s) em "${nomeFazenda}", retiro "${retiro||'Sede'}", no dia ${formatDataBR(data)}. Não tem como desfazer.\n\nDepois de apagar, você pode importar a planilha corrigida logo abaixo, na mesma data.\n\nConfirma?`);
+  if(!passo1) return;
+  const digitado = prompt('Pra confirmar de vez, digite APAGAR (tudo maiúsculo):');
+  if(digitado !== 'APAGAR'){ toast('Cancelado — nada foi apagado.'); return; }
+  setLoading(true);
+  try{
+    for(let i=0;i<ids.length;i+=450){
+      const lote = ids.slice(i,i+450);
+      const batch = db.batch();
+      lote.forEach(id=> batch.delete(db.collection('animais').doc(id)));
+      await batch.commit();
+    }
+    toast(`${ids.length} animal(is) apagado(s) — pode importar a planilha corrigida agora.`);
+    document.getElementById('excluir-manejo-preview').classList.add('hide');
+    document.getElementById('btn-excluir-manejo').classList.add('hide');
+    manejoParaExcluir = null;
+    if(adminScopeKey === (document.getElementById('excluir-manejo-fazenda-select').value)) await loadAdminScopedAnimals();
+  } catch(e){ console.error(e); toast('Erro ao apagar — parte pode ter sido apagada. Confere antes de importar de novo.'); }
+  finally { setLoading(false); }
+});
 
 function renderOperacaoFazendaSelect(){
   const sel = document.getElementById('op-fazenda-select');
@@ -5017,10 +5136,13 @@ function renderAdminFeed(lista){
   wrap.innerHTML = ordenado.map(a=>{
     const hora = a.createdAt && a.createdAt.toDate ? a.createdAt.toDate().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : "—";
     return `<div class="feed-row">
-      <div class="fr-top"><span>#${a.ordem} · ID ${a.id} — ${a.categoria||'—'} ${a.raca||''}</span><span>${a.peso||'—'} kg</span></div>
+      <div class="fr-top"><span>#${a.ordem} · <span class="edit-id" data-admin-edit="${a.docId}" title="Clique pra editar">ID ${a.id}</span> — ${a.categoria||'—'} ${a.raca||''}</span><span>${a.peso||'—'} kg</span></div>
       <div class="fr-meta">${a.fazendaNome||''}${a.retiro?' — '+a.retiro:''} · ${a.auditorNome||a.auditorEmail||'—'} · ${formatDataBR(a.dataTrabalho)} ${hora}</div>
     </div>`;
   }).join("");
+  wrap.querySelectorAll('[data-admin-edit]').forEach(el=>{
+    el.addEventListener('click', ()=> pedirSenhaEEditarAnimal(el.dataset.adminEdit));
+  });
 }
 
 /* ============================================================
@@ -5043,7 +5165,7 @@ function renderAdminEditSearchResults(){
   wrap.innerHTML = lista.map(a=>`
     <div class="animal-row" style="cursor:default;">
       <div class="id-block">
-        <div class="tagid">#${a.ordem} · ID ${a.id}</div>
+        <div class="tagid">#${a.ordem} · <span class="edit-id" data-admin-edit="${a.docId}" title="Clique pra editar">ID ${a.id}${a.idAntigo?' · antigo '+a.idAntigo:''}</span></div>
         <div class="meta">${a.categoria||"—"} · ${a.raca||"—"}${a.pasto?" · 📍"+a.pasto:""} · ${formatDataBR(a.dataTrabalho)}${a.confirmado?' · 🔒 conferido':' · ⏳ pendente'} · ${a.retiro||'Sede'}</div>
       </div>
       <span class="edit" data-admin-edit="${a.docId}">editar ✎</span>
