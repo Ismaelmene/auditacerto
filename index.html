@@ -2303,7 +2303,7 @@ function renderPendenteChecklist(){
         <div class="pend-item" style="justify-content:space-between;">
           <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
             <input type="checkbox" class="item-check" data-id="${a.docId}" ${selectedPendIds.has(a.docId)?'checked':''}>
-            <span>#${a.ordem} · ID ${a.id} · ${a.peso}kg</span>
+            <span>#${a.ordem} · <span class="edit-id" data-editid="${a.docId}" title="Clique pra editar">ID ${a.id}</span> · ${a.peso}kg</span>
           </label>
           <span style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
             <span class="edit" data-editdest="${a.docId}">destino ✎</span>
@@ -2345,6 +2345,13 @@ function renderPendenteChecklist(){
       e.preventDefault();
       e.stopPropagation();
       openEditDestino(el.dataset.editdest);
+    });
+  });
+  wrap.querySelectorAll('[data-editid]').forEach(el=>{
+    el.addEventListener('click', (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      openAnimalForEdit(el.dataset.editid);
     });
   });
   wrap.querySelectorAll('.grp-check').forEach(cb=>{
