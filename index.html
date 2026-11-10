@@ -937,6 +937,16 @@ body.login-mode #app{background:var(--ink);}
                 <input type="checkbox" id="transf-todos" style="width:20px;height:20px;"> Selecionar todos
                 <span id="transf-contador" style="margin-left:auto;font-family:'IBM Plex Mono';font-size:13px;color:var(--ink-soft);">0 de 0</span>
               </label>
+              <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line);">
+                <div style="flex:1;min-width:84px;"><label style="font-size:12px;font-weight:700;color:var(--ink-soft);">Faixa por</label>
+                  <select id="transf-faixa-tipo"><option value="ordem">Ordem (#)</option><option value="id">ID</option></select></div>
+                <div style="flex:1;min-width:70px;"><label style="font-size:12px;font-weight:700;color:var(--ink-soft);">Do nº</label>
+                  <input type="number" id="transf-faixa-de" inputmode="numeric" placeholder="ex: 1"></div>
+                <div style="flex:1;min-width:70px;"><label style="font-size:12px;font-weight:700;color:var(--ink-soft);">Até o nº</label>
+                  <input type="number" id="transf-faixa-ate" inputmode="numeric" placeholder="ex: 50"></div>
+                <button class="btn btn-secondary" id="btn-transf-faixa" style="flex:1;min-width:110px;">Marcar faixa</button>
+                <button class="btn btn-secondary" id="btn-transf-limpar" style="flex:1;min-width:90px;">Limpar</button>
+              </div>
               <div id="transf-lista" style="max-height:340px;overflow-y:auto;"></div>
             </div>
             <div class="field">
@@ -4260,14 +4270,17 @@ function renderExcluirManejoFazendaSelect(){
     if(!porGrupo[key]) porGrupo[key] = { nome: f.nome, key };
   });
   const opcoes = Object.values(porGrupo).sort((a,b)=>a.nome.localeCompare(b.nome));
-  sel.innerHTML = opcoes.length ? opcoes.map(f=>`<option value="${f.key}">${f.nome}</option>`).join("") : `<option value="">Nenhuma fazenda cadastrada</option>`;
+  sel.innerHTML = `<option value="">Selecione a fazenda...</option>` + opcoes.map(f=>`<option value="${f.key}">${f.nome}</option>`).join("");
+  sel.value = "";
+  document.getElementById('excluir-manejo-data').value = "";
   atualizarRetiroExcluirManejo();
 }
 function atualizarRetiroExcluirManejo(){
   const val = document.getElementById('excluir-manejo-fazenda-select').value;
   const selRetiro = document.getElementById('excluir-manejo-retiro-select');
   const retiros = adminFazendas.filter(f=>(f.farmGroupKey||f.id)===val);
-  selRetiro.innerHTML = retiros.length ? retiros.map(r=>`<option value="${(r.retiro||'').replace(/"/g,'&quot;')}">${r.retiro||'Sede'}</option>`).join("") : `<option value="">Sede</option>`;
+  selRetiro.innerHTML = `<option value="__sel__">Selecione o retiro...</option>` + retiros.map(r=>`<option value="${(r.retiro||'').replace(/"/g,'&quot;')}">${r.retiro||'Sede'}</option>`).join("");
+  selRetiro.value = "__sel__";
   document.getElementById('excluir-manejo-preview').classList.add('hide');
   document.getElementById('btn-excluir-manejo').classList.add('hide');
   manejoParaExcluir = null;
@@ -4290,6 +4303,7 @@ document.getElementById('btn-conferir-manejo').addEventListener('click', async (
   const dataVal = document.getElementById('excluir-manejo-data').value;
   const nomeF = document.getElementById('excluir-manejo-fazenda-select').selectedOptions[0]?.textContent || '';
   if(!farmGroupKeyVal){ toast('Selecione a fazenda.'); return; }
+  if(retiroVal === '__sel__'){ toast('Selecione o retiro.'); return; }
   if(!dataVal){ toast('Selecione a data do manejo.'); return; }
   setLoading(true);
   try{
@@ -4359,6 +4373,8 @@ function transfReset(){
   transfContexto = null;
   document.getElementById('transf-resultado').classList.add('hide');
   document.getElementById('transf-lista').innerHTML = '';
+  document.getElementById('transf-faixa-de').value = '';
+  document.getElementById('transf-faixa-ate').value = '';
 }
 function renderTransfDataFazendaSelect(){
   const sel = document.getElementById('transf-fazenda-select');
@@ -4368,14 +4384,18 @@ function renderTransfDataFazendaSelect(){
     if(!porGrupo[key]) porGrupo[key] = { nome: f.nome, key };
   });
   const opcoes = Object.values(porGrupo).sort((a,b)=>a.nome.localeCompare(b.nome));
-  sel.innerHTML = opcoes.length ? opcoes.map(f=>`<option value="${transfEsc(f.key)}">${transfEsc(f.nome)}</option>`).join("") : `<option value="">Nenhuma fazenda cadastrada</option>`;
+  sel.innerHTML = `<option value="">Selecione a fazenda...</option>` + opcoes.map(f=>`<option value="${transfEsc(f.key)}">${transfEsc(f.nome)}</option>`).join("");
+  sel.value = "";
+  document.getElementById('transf-data-origem').value = "";
+  document.getElementById('transf-data-destino').value = "";
   atualizarRetiroTransfData();
 }
 function atualizarRetiroTransfData(){
   const val = document.getElementById('transf-fazenda-select').value;
   const selRetiro = document.getElementById('transf-retiro-select');
   const retiros = adminFazendas.filter(f=>(f.farmGroupKey||f.id)===val);
-  selRetiro.innerHTML = retiros.length ? retiros.map(r=>`<option value="${transfEsc(r.retiro||'')}">${transfEsc(r.retiro||'Sede')}</option>`).join("") : `<option value="">Sede</option>`;
+  selRetiro.innerHTML = `<option value="__sel__">Selecione o retiro...</option>` + retiros.map(r=>`<option value="${transfEsc(r.retiro||'')}">${transfEsc(r.retiro||'Sede')}</option>`).join("");
+  selRetiro.value = "__sel__";
   transfReset();
 }
 document.getElementById('transf-fazenda-select').addEventListener('change', atualizarRetiroTransfData);
@@ -4398,12 +4418,37 @@ document.getElementById('transf-lista').addEventListener('change', e=>{
   if(e.target && e.target.matches('input[data-transf-doc]')) transfAtualizarContador();
 });
 
+document.getElementById('btn-transf-faixa').addEventListener('click', ()=>{
+  const deRaw = document.getElementById('transf-faixa-de').value;
+  const ateRaw = document.getElementById('transf-faixa-ate').value;
+  if(deRaw === '' || ateRaw === ''){ toast('Informe o número inicial e o final da faixa.'); return; }
+  let de = Number(deRaw), ate = Number(ateRaw);
+  if(isNaN(de) || isNaN(ate)){ toast('Faixa inválida.'); return; }
+  if(de > ate){ const t = de; de = ate; ate = t; }
+  const tipo = document.getElementById('transf-faixa-tipo').value;
+  let marcados = 0;
+  transfCandidatos.forEach(a=>{
+    const n = tipo === 'id' ? Number(String(a.id).trim()) : Number(a.ordem);
+    if(!isNaN(n) && String(tipo==='id'?a.id:a.ordem).trim() !== '' && n >= de && n <= ate){
+      const box = document.querySelector(`#transf-lista input[data-transf-doc="${a.docId}"]`);
+      if(box){ box.checked = true; marcados++; }
+    }
+  });
+  transfAtualizarContador();
+  toast(marcados ? `${marcados} animal(is) marcado(s) na faixa ${de} a ${ate}.` : 'Nenhum animal nessa faixa.');
+});
+document.getElementById('btn-transf-limpar').addEventListener('click', ()=>{
+  document.querySelectorAll('#transf-lista input[data-transf-doc]').forEach(b=>{ b.checked = false; });
+  transfAtualizarContador();
+});
+
 document.getElementById('btn-transf-buscar').addEventListener('click', async ()=>{
   const farmGroupKeyVal = document.getElementById('transf-fazenda-select').value;
   const retiroVal = document.getElementById('transf-retiro-select').value;
   const dataVal = document.getElementById('transf-data-origem').value;
   const nomeF = document.getElementById('transf-fazenda-select').selectedOptions[0]?.textContent || '';
   if(!farmGroupKeyVal){ toast('Selecione a fazenda.'); return; }
+  if(retiroVal === '__sel__'){ toast('Selecione o retiro.'); return; }
   if(!dataVal){ toast('Selecione a data de origem.'); return; }
   setLoading(true);
   try{
