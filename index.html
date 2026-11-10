@@ -915,6 +915,39 @@ body.login-mode #app{background:var(--ink);}
           <button class="btn btn-secondary hide" id="btn-excluir-manejo" style="color:var(--alert);border-color:var(--alert);">🗑 Excluir esse manejo</button>
         </div>
 
+        <div class="review-card" style="margin-bottom:22px;border-color:var(--hide-dark);">
+          <div class="review-row"><span class="k" style="font-weight:900;color:var(--hide-dark);">📅 Transferir / corrigir data dos animais</span></div>
+          <p class="page-sub" style="margin:6px 0 12px;">Escolha uma fazenda/retiro e a data em que os animais foram lançados, marque quais deles estão com a data errada e mande pra data certa. Só os marcados mudam; o resto do dia fica como está.</p>
+          <div class="field">
+            <label>Fazenda</label>
+            <select id="transf-fazenda-select"></select>
+          </div>
+          <div class="field">
+            <label>Retiro</label>
+            <select id="transf-retiro-select"></select>
+          </div>
+          <div class="field">
+            <label>Data em que estão lançados (origem)</label>
+            <input type="date" id="transf-data-origem">
+          </div>
+          <button class="btn btn-secondary" id="btn-transf-buscar" style="margin-bottom:10px;">🔍 Buscar animais dessa data</button>
+          <div id="transf-resultado" class="hide">
+            <div class="review-card" style="margin-bottom:10px;">
+              <label style="display:flex;align-items:center;gap:10px;font-weight:800;padding:6px 0 10px;border-bottom:1px solid var(--line);cursor:pointer;">
+                <input type="checkbox" id="transf-todos" style="width:20px;height:20px;"> Selecionar todos
+                <span id="transf-contador" style="margin-left:auto;font-family:'IBM Plex Mono';font-size:13px;color:var(--ink-soft);">0 de 0</span>
+              </label>
+              <div id="transf-lista" style="max-height:340px;overflow-y:auto;"></div>
+            </div>
+            <div class="field">
+              <label>Nova data (destino)</label>
+              <input type="date" id="transf-data-destino">
+            </div>
+            <div class="pasto-hint" style="margin-bottom:10px;">Os animais transferidos entram no <b>fim da ordem</b> da data de destino (continuam a numeração do que já tiver lá), pra não repetir número de ordem.</div>
+            <button class="btn btn-primary" id="btn-transf-aplicar">📅 Transferir animais marcados</button>
+          </div>
+        </div>
+
         <p class="page-sub" style="margin-top:-6px;">Importe uma planilha de animais já auditados de uma fazenda/retiro pra compilar no sistema. Duplicidade de ID é cruzada automaticamente pelo nome da fazenda.</p>
         <div class="field">
           <label>Fazenda</label>
@@ -4211,7 +4244,7 @@ document.getElementById('atab-visao').addEventListener('click', ()=> switchAdmin
 document.getElementById('atab-fazendas').addEventListener('click', ()=>{ switchAdminTab('fazendas'); renderAdminFazendasList(); });
 document.getElementById('atab-auditores').addEventListener('click', ()=>{ switchAdminTab('auditores'); renderAuditoresList(); });
 document.getElementById('atab-conflitos').addEventListener('click', ()=>{ switchAdminTab('conflitos'); renderAdminConflitosList(); });
-document.getElementById('atab-operacao').addEventListener('click', ()=>{ switchAdminTab('operacao'); renderOperacaoFazendaSelect(); renderExcluirManejoFazendaSelect(); });
+document.getElementById('atab-operacao').addEventListener('click', ()=>{ switchAdminTab('operacao'); renderOperacaoFazendaSelect(); renderExcluirManejoFazendaSelect(); renderTransfDataFazendaSelect(); });
 
 /* ============================================================
    EXCLUIR MANEJO DO DIA — apaga todos os animais de uma fazenda/
@@ -4307,6 +4340,165 @@ document.getElementById('btn-excluir-manejo').addEventListener('click', async ()
     manejoParaExcluir = null;
     if(adminScopeKey === (document.getElementById('excluir-manejo-fazenda-select').value)) await loadAdminScopedAnimals();
   } catch(e){ console.error(e); toast('Erro ao apagar — parte pode ter sido apagada. Confere antes de importar de novo.'); }
+  finally { setLoading(false); }
+});
+
+/* ============================================================
+   TRANSFERIR / CORRIGIR DATA — só admin. Escolhe fazenda/retiro/data
+   de origem, marca os animais com a data errada e move pra nova data.
+   Os transferidos entram no fim da ordem da data de destino (mesma
+   fazenda/retiro), mantendo a ordem relativa entre eles. Só muda
+   dataTrabalho e ordem (+ updatedAt/updatedBy); o resto do animal
+   não é tocado.
+   ============================================================ */
+let transfCandidatos = [];   // animais encontrados na data de origem
+let transfContexto = null;   // { farmGroupKey, retiro, dataOrigem, nomeFazenda }
+function transfEsc(v){ return String(v==null?'':v).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function transfReset(){
+  transfCandidatos = [];
+  transfContexto = null;
+  document.getElementById('transf-resultado').classList.add('hide');
+  document.getElementById('transf-lista').innerHTML = '';
+}
+function renderTransfDataFazendaSelect(){
+  const sel = document.getElementById('transf-fazenda-select');
+  const porGrupo = {};
+  adminFazendas.forEach(f=>{
+    const key = f.farmGroupKey || f.id;
+    if(!porGrupo[key]) porGrupo[key] = { nome: f.nome, key };
+  });
+  const opcoes = Object.values(porGrupo).sort((a,b)=>a.nome.localeCompare(b.nome));
+  sel.innerHTML = opcoes.length ? opcoes.map(f=>`<option value="${transfEsc(f.key)}">${transfEsc(f.nome)}</option>`).join("") : `<option value="">Nenhuma fazenda cadastrada</option>`;
+  atualizarRetiroTransfData();
+}
+function atualizarRetiroTransfData(){
+  const val = document.getElementById('transf-fazenda-select').value;
+  const selRetiro = document.getElementById('transf-retiro-select');
+  const retiros = adminFazendas.filter(f=>(f.farmGroupKey||f.id)===val);
+  selRetiro.innerHTML = retiros.length ? retiros.map(r=>`<option value="${transfEsc(r.retiro||'')}">${transfEsc(r.retiro||'Sede')}</option>`).join("") : `<option value="">Sede</option>`;
+  transfReset();
+}
+document.getElementById('transf-fazenda-select').addEventListener('change', atualizarRetiroTransfData);
+document.getElementById('transf-retiro-select').addEventListener('change', transfReset);
+document.getElementById('transf-data-origem').addEventListener('change', transfReset);
+
+function transfAtualizarContador(){
+  const boxes = Array.from(document.querySelectorAll('#transf-lista input[data-transf-doc]'));
+  const marc = boxes.filter(b=>b.checked).length;
+  document.getElementById('transf-contador').textContent = `${marc} de ${boxes.length}`;
+  const todos = document.getElementById('transf-todos');
+  todos.checked = boxes.length > 0 && marc === boxes.length;
+  todos.indeterminate = marc > 0 && marc < boxes.length;
+}
+document.getElementById('transf-todos').addEventListener('change', e=>{
+  document.querySelectorAll('#transf-lista input[data-transf-doc]').forEach(b=>{ b.checked = e.target.checked; });
+  transfAtualizarContador();
+});
+document.getElementById('transf-lista').addEventListener('change', e=>{
+  if(e.target && e.target.matches('input[data-transf-doc]')) transfAtualizarContador();
+});
+
+document.getElementById('btn-transf-buscar').addEventListener('click', async ()=>{
+  const farmGroupKeyVal = document.getElementById('transf-fazenda-select').value;
+  const retiroVal = document.getElementById('transf-retiro-select').value;
+  const dataVal = document.getElementById('transf-data-origem').value;
+  const nomeF = document.getElementById('transf-fazenda-select').selectedOptions[0]?.textContent || '';
+  if(!farmGroupKeyVal){ toast('Selecione a fazenda.'); return; }
+  if(!dataVal){ toast('Selecione a data de origem.'); return; }
+  setLoading(true);
+  try{
+    const snap = await getSafe(db.collection('animais').where('farmGroupKey','==',farmGroupKeyVal).where('dataTrabalho','==',dataVal), 8000);
+    if(snap.uncertain){ toast('Não deu pra buscar agora (conexão instável) — tenta de novo.'); return; }
+    const docs = snap.docs.filter(d => (d.data().retiro||'') === retiroVal);
+    transfCandidatos = docs.map(d=>({ docId:d.id, ...d.data() })).sort((a,b)=>(Number(a.ordem)||0)-(Number(b.ordem)||0));
+    transfContexto = { farmGroupKey: farmGroupKeyVal, retiro: retiroVal, dataOrigem: dataVal, nomeFazenda: nomeF };
+    const box = document.getElementById('transf-resultado');
+    const lista = document.getElementById('transf-lista');
+    if(!transfCandidatos.length){
+      lista.innerHTML = `<div class="pasto-hint" style="margin-top:10px;">Nenhum animal encontrado nessa fazenda/retiro nessa data.</div>`;
+      document.getElementById('transf-contador').textContent = '0 de 0';
+      document.getElementById('transf-todos').checked = false;
+      document.getElementById('transf-todos').indeterminate = false;
+      box.classList.remove('hide');
+      document.getElementById('btn-transf-aplicar').classList.add('hide');
+      document.getElementById('transf-data-destino').closest('.field').classList.add('hide');
+      return;
+    }
+    document.getElementById('btn-transf-aplicar').classList.remove('hide');
+    document.getElementById('transf-data-destino').closest('.field').classList.remove('hide');
+    lista.innerHTML = transfCandidatos.map(a=>`
+      <label style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);cursor:pointer;">
+        <input type="checkbox" data-transf-doc="${transfEsc(a.docId)}" style="width:20px;height:20px;flex-shrink:0;">
+        <span style="flex:1;min-width:0;">
+          <span style="font-family:'IBM Plex Mono';font-weight:800;">#${transfEsc(a.ordem)} · ${transfEsc(a.id)}</span>${a.idAntigo?` <span style="color:var(--ink-soft);font-size:12.5px;">(antigo ${transfEsc(a.idAntigo)})</span>`:''}
+          <span style="display:block;font-size:12.5px;color:var(--ink-soft);">${transfEsc(a.categoria||'—')} · ${transfEsc(a.raca||'—')}${a.peso?` · ${transfEsc(a.peso)} kg`:''}${a.confirmado?' · 🔒 conferido':''}</span>
+        </span>
+      </label>`).join("");
+    box.classList.remove('hide');
+    transfAtualizarContador();
+  } catch(e){ console.error(e); toast('Erro ao buscar animais.'); }
+  finally { setLoading(false); }
+});
+
+document.getElementById('btn-transf-aplicar').addEventListener('click', async ()=>{
+  if(!transfContexto || !transfCandidatos.length) return;
+  const { farmGroupKey, retiro, dataOrigem, nomeFazenda } = transfContexto;
+  const selecionados = Array.from(document.querySelectorAll('#transf-lista input[data-transf-doc]:checked')).map(b=>b.dataset.transfDoc);
+  const dataDestino = document.getElementById('transf-data-destino').value;
+  if(!selecionados.length){ toast('Marque pelo menos um animal.'); return; }
+  if(!dataDestino){ toast('Informe a nova data (destino).'); return; }
+  if(dataDestino === dataOrigem){ toast('A data de destino é igual à de origem.'); return; }
+  setLoading(true);
+  let maxOrdemDestino = 0, qtdDestino = 0;
+  try{
+    const snap = await getSafe(db.collection('animais').where('farmGroupKey','==',farmGroupKey).where('dataTrabalho','==',dataDestino), 8000);
+    if(snap.uncertain){ toast('Não deu pra checar a data de destino (conexão instável) — nada foi alterado. Tenta de novo.'); return; }
+    const doDestino = snap.docs.filter(d => (d.data().retiro||'') === retiro);
+    qtdDestino = doDestino.length;
+    maxOrdemDestino = doDestino.reduce((m,d)=> Math.max(m, Number(d.data().ordem)||0), 0);
+  } catch(e){ console.error(e); toast('Erro ao checar a data de destino — nada foi alterado.'); return; }
+  finally { setLoading(false); }
+
+  const porId = {}; transfCandidatos.forEach(a=>{ porId[a.docId] = a; });
+  const ordenados = selecionados.map(id=>porId[id]).filter(Boolean).sort((a,b)=>(Number(a.ordem)||0)-(Number(b.ordem)||0));
+  const qtdConferidos = ordenados.filter(a=>a.confirmado || a.loteId).length;
+  const msg = `Mover ${ordenados.length} animal(is) de "${nomeFazenda}" / retiro "${retiro||'Sede'}":\n\n` +
+    `DE ${formatDataBR(dataOrigem)}  →  PARA ${formatDataBR(dataDestino)}\n\n` +
+    (qtdDestino ? `A data de destino já tem ${qtdDestino} animal(is) nesse retiro; os movidos entram depois, na ordem ${maxOrdemDestino+1} em diante.\n\n` : `A data de destino está vazia nesse retiro; a ordem começa em 1.\n\n`) +
+    (qtdConferidos ? `Atenção: ${qtdConferidos} já estão conferidos/em lote — só a data do animal muda, o lote continua como está.\n\n` : '') +
+    `Confirma?`;
+  if(!confirm(msg)) return;
+  const digitado = prompt('Pra confirmar, digite TRANSFERIR (tudo maiúsculo):');
+  if(digitado !== 'TRANSFERIR'){ toast('Cancelado — nada foi alterado.'); return; }
+
+  setLoading(true);
+  let feitos = 0;
+  try{
+    const agora = firebase.firestore.Timestamp.now();
+    const updates = ordenados.map((a,i)=>({ docId:a.docId, dataTrabalho:dataDestino, ordem:maxOrdemDestino+1+i }));
+    for(let i=0;i<updates.length;i+=450){
+      const lote = updates.slice(i,i+450);
+      const batch = db.batch();
+      lote.forEach(u=> batch.update(db.collection('animais').doc(u.docId), { dataTrabalho:u.dataTrabalho, ordem:u.ordem, updatedAt:agora, updatedBy:currentUser.uid }));
+      await batch.commit();
+      feitos += lote.length;
+    }
+    updates.forEach(u=>{
+      const patch = { dataTrabalho:u.dataTrabalho, ordem:u.ordem, updatedAt:agora, updatedBy:currentUser.uid };
+      const iA = adminAllAnimals.findIndex(x=>x.docId===u.docId);
+      if(iA>-1) adminAllAnimals[iA] = { ...adminAllAnimals[iA], ...patch };
+      const iB = animals.findIndex(x=>x.docId===u.docId);
+      if(iB>-1) animals[iB] = { ...animals[iB], ...patch };
+    });
+    toast(`${feitos} animal(is) transferido(s) para ${formatDataBR(dataDestino)}.`);
+    transfReset();
+    document.getElementById('transf-data-destino').value = '';
+    if(adminScopeKey === farmGroupKey) await loadAdminScopedAnimals();
+  } catch(e){
+    console.error(e);
+    toast(`Erro — ${feitos} de ${ordenados.length} foram transferidos. Busque de novo a data de origem pra conferir o que sobrou.`);
+    transfReset();
+  }
   finally { setLoading(false); }
 });
 
